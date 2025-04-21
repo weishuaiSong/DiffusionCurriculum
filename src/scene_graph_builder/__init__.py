@@ -1,0 +1,1 @@
+from .relation_generator import RelationGenerator, RelationGenerationConfig

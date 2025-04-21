@@ -163,8 +163,6 @@ cython_debug/
 
 .idea/
 
-**.json
-**.jsonl
-configs/
+configs/keys.yaml
 
 test.ipynb

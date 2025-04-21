@@ -2,10 +2,9 @@ import asyncio
 import json
 import yaml
 import logging
-from src.api import StreamGenerator
-from src.utils import setup_logger
+from api import StreamGenerator
+from utils import setup_logger
 from typing import List
-
 
 async def generate_to_file(
         prompts: List[str],
@@ -40,7 +39,8 @@ async def generate_to_file(
     )
 
     with open(output_file, "w", encoding="utf-8") as f:
-        async for result in generator.generate_stream(prompts, system_prompt):
+        # validate_func(answer:str)->bool
+        async for result in generator.generate_stream(prompts, system_prompt, validate_func=None):
             if result is not None:
                 f.write(json.dumps(result, ensure_ascii=False) + "\n")
                 f.flush()  # Ensure immediate write
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     logger.info("Starting !")
 
     prompts = ["Tell me about Paris", "Describe Tokyo", "Explain quantum computing"]
-    api_keys = yaml.safe_load(open("../configs/keys.yaml", "r")).get("keys", [])
+    api_keys = yaml.safe_load(open("./configs/keys.yaml", "r")).get("keys", [])
 
     asyncio.run(
         generate_to_file(

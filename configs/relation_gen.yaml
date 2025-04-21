@@ -1,0 +1,14 @@
+mode: both  # or "independent" or "dependent"
+keys_path: "/Users/wangshijian/dev/DiffusionCurriculum/configs/keys.yaml"
+model_name: "deepseek-v3-0324"
+system_prompt: ""
+output_file: "/Users/wangshijian/dev/DiffusionCurriculum/assets/relations.json"
+max_concurrent_per_key: 300
+max_retries: 5
+independent_relation_types:
+  - positional
+  - spatial
+  - temporal
+examples_per_type: 10
+category_file: "/Users/wangshijian/dev/DiffusionCurriculum/assets/categories.json"  # required for dependent mode
+examples_per_pair: 5

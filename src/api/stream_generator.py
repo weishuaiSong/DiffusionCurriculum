@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, List, Dict, Any, Optional
+from typing import AsyncGenerator, List, Dict, Any, Optional, Callable
 import logging
 from .async_pool import APIPool
 
@@ -44,7 +44,8 @@ class StreamGenerator:
     async def generate_stream(
             self,
             prompts: List[str],
-            system_prompt: str = ""
+            system_prompt: str = "",
+            validate_func: Optional[Callable[[str], Any]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Generate responses for a list of prompts in a streaming fashion.
@@ -52,6 +53,7 @@ class StreamGenerator:
         Args:
             prompts: List of user prompts
             system_prompt: System prompt (same for all requests)
+            validate_func: Optional function to validate the response.
 
         Yields:
             Dictionary containing response data
@@ -63,7 +65,8 @@ class StreamGenerator:
                 task = asyncio.create_task(
                     self._generate_single(
                         system_prompt=system_prompt,
-                        user_prompt=prompt
+                        user_prompt=prompt,
+                        validate_func=validate_func
                     )
                 )
                 tasks.add(task)
@@ -100,7 +103,8 @@ class StreamGenerator:
     async def _generate_single(
             self,
             system_prompt: str,
-            user_prompt: str
+            user_prompt: str,
+            validate_func: Optional[Callable[[str], Any]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Generate a single response with retry mechanism.
@@ -108,6 +112,7 @@ class StreamGenerator:
         Args:
             system_prompt: System prompt
             user_prompt: User prompt
+            validate_func: Optional function to validate the response
 
         Returns:
             Parsed JSON response or None if failed
@@ -123,7 +128,18 @@ class StreamGenerator:
                         rational=self.rational
                     )
 
-                    return response["answer"]
+                    answer = response["answer"]
+
+                    # If validation function exists, validate the answer
+                    if validate_func is not None:
+                        if not validate_func(answer):
+                            logger.warning(f"Answer validation failed, retrying (attempt {retry_count + 1})")
+                            retry_count += 1
+                            continue
+                        else:
+                            answer = validate_func(answer)
+
+                    return answer
 
                 except Exception as e:
                     logger.warning(f"Generation error: {e}, retrying (attempt {retry_count + 1})")
