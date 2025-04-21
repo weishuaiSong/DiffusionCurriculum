@@ -163,4 +163,8 @@ cython_debug/
 
 .idea/
 
+**.json
+**.jsonl
+configs/
+
 test.ipynb

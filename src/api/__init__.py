@@ -1,1 +1,1 @@
-from .async_pool import APIPool
+from .stream_generator import StreamGenerator

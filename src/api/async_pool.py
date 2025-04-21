@@ -1,9 +1,8 @@
 import asyncio
 import random
-from typing import List, Dict, Any, Callable, Optional, TypeVar, Generic
+from typing import List, Dict, Any, TypeVar
 import logging
 from .wrapper import QAWrapper
-import time
 
 T = TypeVar('T')
 logger = logging.getLogger(__name__)

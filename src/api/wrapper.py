@@ -1,6 +1,5 @@
 from openai import AsyncOpenAI
-from typing import Dict, Any, Optional
-import asyncio
+from typing import Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -72,10 +71,10 @@ class QAWrapper:
                     raise
 
                 # Exponential backoff before retrying
-                retry_delay = 2 ** attempt
-                await asyncio.sleep(retry_delay)
+                # retry_delay = 2 ** attempt
+                # await asyncio.sleep(retry_delay)
 
-    async def _qa_standard(self, system_prompt: str, user_prompt: str) -> str:
+    async def _qa_standard(self, system_prompt: str, user_prompt: str) -> Dict[str, str]:
         """Execute a standard query without reasoning."""
         completion = await self.client.chat.completions.create(
             model=self.model_name,
