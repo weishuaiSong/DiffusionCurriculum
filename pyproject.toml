@@ -4,6 +4,10 @@ version = "0.1.0"
 dependencies = [
     "openai>=0.28.0",
     "PyYAML>=6.0",
+    "torchvision>=0.21.0",
+    "transformers>=4.51.3",
+    "trl>=0.16.1",
+    "wandb>=0.19.9",
 ]
 
 [build-system]
