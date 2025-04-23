@@ -31,18 +31,16 @@ class VQAScorer:
                             },
                             {
                                 "type": "text",
-                                "text": qa[0]["question"],
+                                "text": qa[i]["question"],
                             },
                         ],
                     }
                 ]
             )  # type: ignore
             answer = response[0]["generated_text"]
-            _, _, bert_scores = calc_bert_score([answer], [qa[0]["answer"]], lang="en", verbose=True)
+            _, _, bert_scores = calc_bert_score([answer], [qa[i]["answer"]], lang="en", verbose=True)
             reward_score = bert_scores.mean().item() * 10  # type: ignore
             score = np.array(reward_score)
 
             scores.append(score)
-            # TODO: change to mean of scores to int
-            self.set_curr_score(score.mean().item())
         return np.array(scores)  # type: ignore

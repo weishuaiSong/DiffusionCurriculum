@@ -142,7 +142,7 @@ Examples should describe: {self._get_relation_description(relation_type)}"""
 ## Requirements:
 1. Provide exactly {examples_per_pair} distinct relations
 2. Relations should be specific to these object types
-3. Use verb phrases where appropriate (e.g., 'holding', 'looking at')
+3. Use short verb phrases where appropriate (e.g., 'holding', 'looking at'), without any explanations
 4. Relations should be plausible real-world interactions
 5. Return ONLY the JSON dictionary
 

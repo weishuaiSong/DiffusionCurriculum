@@ -1,0 +1,9 @@
+# Configuration for object generation
+model_name: "deepseek-v3-0324"
+keys_path: "configs/keys.yaml"
+output_file: "assets/objects.json"
+category_file: "assets/categories.json"  # Path to JSON file containing categories list
+objects_per_category: 50          # Number of objects to generate per category
+system_prompt: ""                # Optional system prompt for LLM
+max_concurrent_per_key: 300      # Maximum concurrent requests per API key
+max_retries: 5                   # Maximum retry attempts for failed requests

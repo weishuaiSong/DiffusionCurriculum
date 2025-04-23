@@ -8,10 +8,24 @@
         "outside",
         "beside",
         "between",
+        "near",
+        "far from",
         "in front of",
-        "behind",
+        "behind"
+      ]
+    },
+    {
+      "positional": [
         "next to",
-        "near"
+        "above",
+        "below",
+        "beside",
+        "under",
+        "over",
+        "near",
+        "far from",
+        "between",
+        "around"
       ]
     },
     {
@@ -20,39 +34,36 @@
         "after",
         "during",
         "while",
-        "until",
-        "since",
-        "when",
-        "as soon as",
-        "once",
-        "whenever"
-      ]
-    },
-    {
-      "positional": [
-        "near",
-        "far from",
-        "next to",
-        "adjacent to",
-        "above",
-        "below",
-        "inside",
-        "outside",
-        "between",
-        "behind"
+        "simultaneous with",
+        "preceding",
+        "following",
+        "at the same time as",
+        "prior to",
+        "subsequent to"
       ]
     }
   ],
   "object-dependent-relations": [
     {
-      "category1": "People",
-      "category2": "Animals",
+      "category1": "Cities and Architecture",
+      "category2": "People",
       "relations": [
-        "feeding",
-        "petting",
-        "walking",
-        "training",
-        "rescuing"
+        "living in",
+        "designing",
+        "admiring",
+        "visiting",
+        "working in"
+      ]
+    },
+    {
+      "category1": "People",
+      "category2": "Food and Beverages",
+      "relations": [
+        "eating",
+        "drinking",
+        "preparing",
+        "serving",
+        "buying"
       ]
     },
     {
@@ -63,7 +74,139 @@
         "planting",
         "pruning",
         "harvesting",
-        "admiring"
+        "smelling"
+      ]
+    },
+    {
+      "category1": "People",
+      "category2": "Animals",
+      "relations": [
+        "feeding",
+        "petting",
+        "walking",
+        "riding",
+        "photographing"
+      ]
+    },
+    {
+      "category1": "People",
+      "category2": "Plants",
+      "relations": [
+        "watering",
+        "planting",
+        "pruning",
+        "harvesting",
+        "smelling"
+      ]
+    },
+    {
+      "category1": "People",
+      "category2": "Technology and Industry",
+      "relations": [
+        "using",
+        "developing",
+        "designing",
+        "repairing",
+        "investing in"
+      ]
+    },
+    {
+      "category1": "People",
+      "category2": "Transportation",
+      "relations": [
+        "driving",
+        "boarding",
+        "repairing",
+        "waiting for",
+        "exiting"
+      ]
+    },
+    {
+      "category1": "Animals",
+      "category2": "Everyday Objects",
+      "relations": [
+        "chewing",
+        "sleeping on",
+        "knocking over",
+        "hiding under",
+        "playing with"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Technology and Industry",
+      "relations": [
+        "monitoring",
+        "harvesting resources",
+        "impacting",
+        "restoring",
+        "documenting"
+      ]
+    },
+    {
+      "category1": "Animals",
+      "category2": "Transportation",
+      "relations": [
+        "pulling",
+        "riding",
+        "blocking",
+        "boarding",
+        "chasing"
+      ]
+    },
+    {
+      "category1": "Animals",
+      "category2": "Everyday Objects",
+      "relations": [
+        "chewing",
+        "sleeping on",
+        "knocking over",
+        "hiding under",
+        "playing with"
+      ]
+    },
+    {
+      "category1": "Animals",
+      "category2": "Abstract and Conceptual Art",
+      "relations": [
+        "inspired by",
+        "depicting",
+        "interacting with",
+        "representing",
+        "influenced by"
+      ]
+    },
+    {
+      "category1": "Animals",
+      "category2": "Sports and Fitness",
+      "relations": [
+        "riding",
+        "training with",
+        "competing alongside",
+        "photographing during",
+        "exercising near"
+      ]
+    },
+    {
+      "category1": "People",
+      "category2": "Art and Culture",
+      "relations": [
+        "creating",
+        "admiring",
+        "collecting",
+        "curating",
+        "performing in"
+      ]
+    },
+    {
+      "category1": "Technology and Industry",
+      "category2": "Everyday Objects",
+      "relations": [
+        "manufacturing",
+        "enhancing",
+        "automating",
+        "monitoring",
+        "connecting"
       ]
     },
     {
@@ -71,109 +214,10 @@
       "category2": "Abstract and Conceptual Art",
       "relations": [
         "creating",
+        "viewing",
         "critiquing",
-        "exhibiting in galleries",
-        "interpreting meanings",
-        "collecting for private display"
-      ]
-    },
-    {
-      "category1": "People",
-      "category2": "Everyday Objects",
-      "relations": [
-        "using a smartphone",
-        "carrying a backpack",
-        "wearing sunglasses",
-        "drinking from a water bottle",
-        "reading a book"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "People",
-      "relations": [
-        "hiking through",
-        "photographing",
-        "camping in",
-        "painting",
-        "conserving"
-      ]
-    },
-    {
-      "category1": "People",
-      "category2": "Transportation",
-      "relations": [
-        "driving a car",
-        "boarding a bus",
-        "riding a bicycle",
-        "waiting for a train",
-        "hailing a taxi"
-      ]
-    },
-    {
-      "category1": "Animals",
-      "category2": "Everyday Objects",
-      "relations": [
-        "chewing on a shoe",
-        "sleeping on a pillow",
-        "knocking over a vase",
-        "scratching a couch",
-        "playing with a ball"
-      ]
-    },
-    {
-      "category1": "Animals",
-      "category2": "Plants",
-      "relations": [
-        "grazing on",
-        "pollinating",
-        "sheltering under",
-        "dispersing seeds of",
-        "feeding on"
-      ]
-    },
-    {
-      "category1": "People",
-      "category2": "Food and Beverages",
-      "relations": [
-        "eating",
-        "preparing",
-        "serving",
-        "ordering at a restaurant",
-        "packing for a picnic"
-      ]
-    },
-    {
-      "category1": "People",
-      "category2": "Sports and Fitness",
-      "relations": [
-        "playing a sport",
-        "watching a fitness tutorial",
-        "attending a gym session",
-        "competing in a marathon",
-        "purchasing sports equipment"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "Cities and Architecture",
-      "relations": [
-        "surrounding",
-        "influencing the design of",
-        "providing resources for",
-        "being preserved within",
-        "offering scenic views to"
-      ]
-    },
-    {
-      "category1": "People",
-      "category2": "Sports and Fitness",
-      "relations": [
-        "playing a sport",
-        "watching a fitness tutorial",
-        "attending a gym session",
-        "competing in a marathon",
-        "purchasing sports equipment"
+        "collecting",
+        "interpreting"
       ]
     },
     {
@@ -182,603 +226,636 @@
       "relations": [
         "eating",
         "drinking",
-        "carrying in mouth",
-        "stealing from humans",
-        "storing for later consumption"
+        "carrying",
+        "smelling",
+        "storing"
       ]
     },
     {
       "category1": "People",
-      "category2": "Art and Culture",
+      "category2": "Abstract and Conceptual Art",
       "relations": [
-        "creating artwork",
-        "attending a cultural festival",
-        "studying art history",
-        "performing in a theater production",
-        "collecting traditional crafts"
+        "creating",
+        "viewing",
+        "critiquing",
+        "collecting",
+        "interpreting"
+      ]
+    },
+    {
+      "category1": "People",
+      "category2": "Everyday Objects",
+      "relations": [
+        "holding",
+        "using",
+        "cleaning",
+        "repairing",
+        "collecting"
+      ]
+    },
+    {
+      "category1": "People",
+      "category2": "Sports and Fitness",
+      "relations": [
+        "playing",
+        "watching",
+        "training for",
+        "competing in",
+        "coaching"
       ]
     },
     {
       "category1": "Natural Landscapes",
-      "category2": "Plants",
+      "category2": "People",
       "relations": [
-        "supporting the growth of",
-        "providing habitats for",
-        "shaping the biodiversity of",
-        "being altered by invasive",
-        "depending on for ecological balance"
+        "exploring",
+        "photographing",
+        "conserving",
+        "admiring",
+        "hiking through"
       ]
     },
     {
-      "category1": "Cities and Architecture",
-      "category2": "People",
+      "category1": "Animals",
+      "category2": "Plants",
       "relations": [
-        "admiring skyscrapers",
-        "navigating through urban streets",
-        "living in residential buildings",
-        "visiting historical landmarks",
-        "designing city layouts"
+        "eating",
+        "nesting in",
+        "pollinating",
+        "sheltering under",
+        "uprooting"
+      ]
+    },
+    {
+      "category1": "Everyday Objects",
+      "category2": "Abstract and Conceptual Art",
+      "relations": [
+        "reinterpreting",
+        "transforming",
+        "contextualizing",
+        "displaying",
+        "questioning"
       ]
     },
     {
       "category1": "Plants",
-      "category2": "Food and Beverages",
-      "relations": [
-        "used as ingredients in",
-        "processed into",
-        "grown for producing",
-        "flavored with extracts from",
-        "decorated with"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "Animals",
-      "relations": [
-        "Animals inhabiting natural landscapes",
-        "Natural landscapes providing shelter for animals",
-        "Animals grazing in natural landscapes",
-        "Natural landscapes serving as migration routes for animals",
-        "Animals adapting to the conditions of natural landscapes"
-      ]
-    },
-    {
-      "category1": "Animals",
-      "category2": "Sports and Fitness",
-      "relations": [
-        "horses competing in equestrian sports",
-        "dogs participating in agility training",
-        "falcons used in falconry demonstrations",
-        "bulls involved in rodeo events",
-        "dolphins performing in aquatic shows"
-      ]
-    },
-    {
-      "category1": "Animals",
       "category2": "Art and Culture",
       "relations": [
         "depicted in paintings",
-        "featured in folklore and mythology",
-        "inspiration for sculptures",
-        "subjects of photography exhibitions",
-        "symbols in cultural rituals"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "Technology and Industry",
-      "relations": [
-        "monitoring with drones",
-        "extracting resources from",
-        "mapping with satellite imagery",
-        "generating renewable energy in",
-        "restoring ecosystems using industrial techniques"
-      ]
-    },
-    {
-      "category1": "Art and Culture",
-      "category2": "Everyday Objects",
-      "relations": [
-        "depicting everyday objects in paintings",
-        "using household items as art materials",
-        "displaying cultural artifacts in modern homes",
-        "transforming mundane objects into sculptures",
-        "referencing everyday objects in performance art"
-      ]
-    },
-    {
-      "category1": "Animals",
-      "category2": "Transportation",
-      "relations": [
-        "pulling a cart",
-        "riding in a vehicle",
-        "being transported in a crate",
-        "guarding a truck",
-        "crossing a road"
-      ]
-    },
-    {
-      "category1": "Plants",
-      "category2": "Art and Culture",
-      "relations": [
-        "depicted in botanical illustrations",
-        "used as motifs in textile designs",
-        "inspiring landscape paintings",
-        "featured in floral arrangements for exhibitions",
-        "symbolized in cultural rituals and ceremonies"
-      ]
-    },
-    {
-      "category1": "Plants",
-      "category2": "Transportation",
-      "relations": [
-        "Plants absorbing carbon dioxide emitted by transportation",
-        "Transportation vehicles transporting plants for distribution",
-        "Plants used as biofuels to power transportation",
-        "Transportation infrastructure displacing natural plant habitats",
-        "Plants reducing urban heat islands caused by transportation"
-      ]
-    },
-    {
-      "category1": "People",
-      "category2": "Technology and Industry",
-      "relations": [
-        "using smartphones for communication",
-        "developing software applications",
-        "operating heavy machinery in factories",
-        "designing renewable energy systems",
-        "researching artificial intelligence algorithms"
-      ]
-    },
-    {
-      "category1": "Everyday Objects",
-      "category2": "Transportation",
-      "relations": [
-        "placing a backpack in a car trunk",
-        "using a phone for GPS navigation in a vehicle",
-        "storing a bicycle in a garage",
-        "carrying groceries on a bus",
-        "attaching a bike lock to a bicycle"
-      ]
-    },
-    {
-      "category1": "Cities and Architecture",
-      "category2": "Animals",
-      "relations": [
-        "Birds nesting on skyscrapers",
-        "Stray dogs roaming urban streets",
-        "Horses pulling carriages in historic districts",
-        "Pigeons perching on statues and monuments",
-        "Bats inhabiting bridges and tunnels"
-      ]
-    },
-    {
-      "category1": "Food and Beverages",
-      "category2": "Everyday Objects",
-      "relations": [
-        "storing in a refrigerator",
-        "serving on a plate",
-        "pouring into a glass",
-        "wrapping in aluminum foil",
-        "cutting with a knife"
-      ]
-    },
-    {
-      "category1": "Sports and Fitness",
-      "category2": "Transportation",
-      "relations": [
-        "cycling as a form of transportation",
-        "using public transport to reach a sports facility",
-        "transporting sports equipment in a vehicle",
-        "jogging alongside a bicycle path",
-        "using a skateboard for commuting"
-      ]
-    },
-    {
-      "category1": "Art and Culture",
-      "category2": "Transportation",
-      "relations": [
-        "depicting transportation in artwork",
-        "using public transport to visit cultural sites",
-        "displaying art in subway stations",
-        "designing vehicles with cultural motifs",
-        "hosting art exhibitions on trains"
-      ]
-    },
-    {
-      "category1": "Art and Culture",
-      "category2": "Technology and Industry",
-      "relations": [
-        "inspiring technological innovations through artistic creativity",
-        "using digital tools to preserve and restore cultural artifacts",
-        "incorporating industrial materials into modern art installations",
-        "leveraging virtual reality to enhance museum experiences",
-        "documenting industrial history through artistic photography"
-      ]
-    },
-    {
-      "category1": "Technology and Industry",
-      "category2": "Transportation",
-      "relations": [
-        "driving innovation in autonomous vehicles",
-        "optimizing logistics through AI-powered routing",
-        "reducing emissions with electric vehicle advancements",
-        "enhancing safety with smart traffic management systems",
-        "streamlining supply chains using IoT-enabled tracking"
-      ]
-    },
-    {
-      "category1": "Food and Beverages",
-      "category2": "Technology and Industry",
-      "relations": [
-        "manufacturing packaging for food products",
-        "developing automation systems for beverage production",
-        "using AI to optimize food supply chains",
-        "creating lab-grown meat through biotech",
-        "monitoring food safety with IoT sensors"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "Transportation",
-      "relations": [
-        "Transportation routes cutting through natural landscapes",
-        "Natural landscapes obstructing transportation pathways",
-        "Transportation vehicles traversing natural landscapes",
-        "Natural landscapes providing scenic views for transportation passengers",
-        "Transportation infrastructure altering natural landscapes"
-      ]
-    },
-    {
-      "category1": "Plants",
-      "category2": "Abstract and Conceptual Art",
-      "relations": [
-        "inspiring color palettes in abstract art",
-        "serving as living sculptures in conceptual installations",
-        "being photographed for abstract compositions",
-        "used as natural materials in mixed-media artworks",
-        "symbolizing growth and decay in conceptual pieces"
-      ]
-    },
-    {
-      "category1": "Animals",
-      "category2": "Technology and Industry",
-      "relations": [
-        "Animals being monitored by drones for conservation efforts",
-        "Robotic milking machines used in dairy farming",
-        "GPS tracking collars attached to wildlife for research",
-        "AI-powered cameras identifying endangered species in the wild",
-        "Genetically modified animals producing pharmaceuticals in bioreactors"
-      ]
-    },
-    {
-      "category1": "Everyday Objects",
-      "category2": "Abstract and Conceptual Art",
-      "relations": [
-        "displaying everyday objects as ready-made art",
-        "recontextualizing mundane items in conceptual installations",
-        "using household items to create abstract sculptures",
-        "photographing ordinary objects to explore abstract compositions",
-        "arranging common tools in minimalist art exhibits"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "Sports and Fitness",
-      "relations": [
-        "hiking through natural landscapes for fitness",
-        "practicing yoga in scenic outdoor settings",
-        "trail running on mountainous terrain",
-        "kayaking or canoeing in rivers and lakes",
-        "rock climbing on natural rock formations"
-      ]
-    },
-    {
-      "category1": "Sports and Fitness",
-      "category2": "Technology and Industry",
-      "relations": [
-        "using wearable fitness trackers to monitor athletic performance",
-        "developing advanced materials for sports equipment manufacturing",
-        "streaming live sports events on digital platforms",
-        "applying data analytics to optimize training regimens",
-        "integrating virtual reality for immersive sports training simulations"
-      ]
-    },
-    {
-      "category1": "Animals",
-      "category2": "Abstract and Conceptual Art",
-      "relations": [
-        "Animals inspiring abstract art through their movements",
-        "Conceptual art installations featuring live animals as elements",
-        "Abstract sculptures shaped like animal forms",
-        "Animals interacting with abstract art in gallery spaces",
-        "Artists using animal behavior to create generative abstract art"
-      ]
-    },
-    {
-      "category1": "Sports and Fitness",
-      "category2": "Everyday Objects",
-      "relations": [
-        "using a water bottle for hydration during workouts",
-        "wearing a fitness tracker to monitor activity levels",
-        "carrying a gym bag filled with sports equipment",
-        "tying shoelaces on athletic shoes before running",
-        "placing a yoga mat on the floor for exercise"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "Abstract and Conceptual Art",
-      "relations": [
-        "inspiring color palettes for abstract paintings",
-        "serving as the subject of conceptual art installations",
-        "influencing the textures and forms in abstract sculptures",
-        "being reinterpreted through minimalist abstract compositions",
-        "providing a backdrop for outdoor conceptual art exhibitions"
-      ]
-    },
-    {
-      "category1": "Art and Culture",
-      "category2": "Abstract and Conceptual Art",
-      "relations": [
-        "influencing contemporary cultural movements",
-        "challenging traditional artistic norms",
-        "inspiring philosophical discussions in cultural circles",
-        "being exhibited in major cultural institutions",
-        "reflecting societal changes through abstract forms"
-      ]
-    },
-    {
-      "category1": "Food and Beverages",
-      "category2": "Sports and Fitness",
-      "relations": [
-        "consuming energy drinks during workouts",
-        "eating protein bars for muscle recovery",
-        "hydrating with sports drinks after exercise",
-        "packing healthy snacks for athletic events",
-        "sponsoring sports teams by beverage brands"
-      ]
-    },
-    {
-      "category1": "Technology and Industry",
-      "category2": "Everyday Objects",
-      "relations": [
-        "manufacturing using industrial machines",
-        "controlling via smartphone apps",
-        "monitoring with embedded sensors",
-        "powering through rechargeable batteries",
-        "customizing with 3D printing technology"
-      ]
-    },
-    {
-      "category1": "Plants",
-      "category2": "Sports and Fitness",
-      "relations": [
-        "using bamboo for yoga mats",
-        "planting trees around running tracks for shade",
-        "decorating gyms with indoor plants for air purification",
-        "using aloe vera for post-workout skin care",
-        "incorporating herbal teas in athlete recovery routines"
-      ]
-    },
-    {
-      "category1": "Food and Beverages",
-      "category2": "Transportation",
-      "relations": [
-        "delivering food and beverages via transportation",
-        "serving food and beverages on public transportation",
-        "transporting raw ingredients for food production",
-        "using refrigerated trucks to preserve perishable food items",
-        "advertising food and beverages on transportation vehicles"
-      ]
-    },
-    {
-      "category1": "Cities and Architecture",
-      "category2": "Art and Culture",
-      "relations": [
-        "hosting art exhibitions in historic buildings",
-        "incorporating murals and street art into urban design",
-        "designing museums and galleries as architectural landmarks",
-        "preserving cultural heritage through restoration of monuments",
-        "inspiring artists with iconic cityscapes and skylines"
-      ]
-    },
-    {
-      "category1": "Plants",
-      "category2": "Technology and Industry",
-      "relations": [
-        "Plants being genetically modified by biotechnology firms",
-        "Industrial machinery harvesting plants for biofuel production",
-        "Plants used in phytoremediation to clean industrial waste",
-        "Automated irrigation systems watering plants in agriculture",
-        "Plants processed into raw materials for biodegradable packaging"
-      ]
-    },
-    {
-      "category1": "Plants",
-      "category2": "Everyday Objects",
-      "relations": [
-        "watering plants with a watering can",
-        "placing plants on a windowsill",
-        "using a vase to hold cut flowers",
-        "decorating a room with potted plants",
-        "hanging plants from a ceiling hook"
-      ]
-    },
-    {
-      "category1": "Cities and Architecture",
-      "category2": "Abstract and Conceptual Art",
-      "relations": [
-        "inspiring architectural designs with abstract art motifs",
-        "displaying conceptual art installations in urban plazas",
-        "incorporating abstract art into building facades",
-        "using city grids as a framework for conceptual art projects",
-        "hosting abstract art exhibitions in architecturally significant landmarks"
-      ]
-    },
-    {
-      "category1": "Food and Beverages",
-      "category2": "Art and Culture",
-      "relations": [
-        "depicting in paintings or sculptures",
-        "serving at gallery openings or exhibitions",
-        "inspiring culinary-themed art installations",
-        "featuring in cultural festivals as traditional dishes",
-        "pairing with performances (e.g., wine and opera nights)"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "Art and Culture",
-      "relations": [
-        "inspiring artistic creations like paintings and poetry",
-        "serving as backdrops for cultural festivals and performances",
-        "being preserved and celebrated in indigenous storytelling",
-        "influencing architectural designs and urban planning",
-        "providing settings for film and photography projects"
-      ]
-    },
-    {
-      "category1": "Cities and Architecture",
-      "category2": "Transportation",
-      "relations": [
-        "Cities designing bike lanes to integrate with architectural layouts",
-        "Public transportation hubs influencing urban architectural planning",
-        "Architectural landmarks serving as focal points for transportation routes",
-        "Transportation infrastructure shaping the skyline of cities",
-        "Historic buildings being repurposed as transportation centers"
+        "used in floral arrangements",
+        "inspiring architectural designs",
+        "symbolizing themes in literature",
+        "featured in botanical illustrations"
       ]
     },
     {
       "category1": "Transportation",
       "category2": "Abstract and Conceptual Art",
       "relations": [
-        "depicting transportation in abstract forms",
-        "using transportation materials in conceptual art installations",
-        "exploring movement and speed through abstract paintings",
-        "displaying conceptual art on public transportation vehicles",
-        "creating performance art involving transportation systems"
-      ]
-    },
-    {
-      "category1": "Natural Landscapes",
-      "category2": "Food and Beverages",
-      "relations": [
-        "harvesting ingredients from natural landscapes",
-        "enjoying a picnic in scenic natural settings",
-        "producing wine from grapes grown in vineyard landscapes",
-        "foraging wild edibles in forests or meadows",
-        "serving locally sourced food inspired by regional landscapes"
-      ]
-    },
-    {
-      "category1": "Cities and Architecture",
-      "category2": "Technology and Industry",
-      "relations": [
-        "Smart cities integrating IoT technology for urban infrastructure management",
-        "Architectural firms utilizing 3D printing for constructing building components",
-        "Industrial automation influencing the design of modern factory buildings",
-        "Renewable energy technologies being incorporated into sustainable architectural designs",
-        "Urban planning software optimizing city layouts for industrial efficiency"
-      ]
-    },
-    {
-      "category1": "Cities and Architecture",
-      "category2": "Sports and Fitness",
-      "relations": [
-        "hosting marathons in iconic city squares",
-        "designing stadiums with innovative architectural features",
-        "incorporating rooftop running tracks on skyscrapers",
-        "building public parks with integrated fitness zones",
-        "organizing outdoor yoga sessions in historic plazas"
+        "displaying",
+        "inspired by",
+        "depicting",
+        "transporting",
+        "integrating into"
       ]
     },
     {
       "category1": "Cities and Architecture",
       "category2": "Everyday Objects",
       "relations": [
-        "A skyscraper reflecting sunlight onto a parked car",
-        "A streetlight illuminating a bicycle leaning against a building",
-        "A park bench supporting a backpack left behind by a visitor",
-        "A subway station entrance sheltering a person holding an umbrella",
-        "A bridge casting a shadow over a boat passing underneath"
+        "containing",
+        "inspired by",
+        "constructed using",
+        "reflecting in",
+        "photographing with"
       ]
     },
     {
-      "category1": "Technology and Industry",
+      "category1": "Transportation",
       "category2": "Abstract and Conceptual Art",
       "relations": [
-        "inspiring digital art installations with industrial machinery",
-        "using 3D printing technology to create abstract sculptures",
-        "projecting conceptual art onto factory walls via augmented reality",
-        "incorporating circuit board designs into abstract paintings",
-        "automating brushstroke patterns with robotic arms in art studios"
+        "displaying",
+        "inspired by",
+        "depicting",
+        "transporting",
+        "integrating into"
       ]
     },
     {
       "category1": "Cities and Architecture",
+      "category2": "Everyday Objects",
+      "relations": [
+        "containing",
+        "inspired by",
+        "constructed using",
+        "reflecting in",
+        "photographing with"
+      ]
+    },
+    {
+      "category1": "Plants",
       "category2": "Food and Beverages",
       "relations": [
-        "Restaurants housed in historic buildings",
-        "Food markets located beneath skyscrapers",
-        "Cafés with views of iconic bridges",
-        "Street vendors serving food near architectural landmarks",
-        "Rooftop bars overlooking cityscapes"
+        "producing",
+        "flavoring",
+        "infusing",
+        "garnishing",
+        "fermenting into"
+      ]
+    },
+    {
+      "category1": "Cities and Architecture",
+      "category2": "Abstract and Conceptual Art",
+      "relations": [
+        "inspired by",
+        "integrated into",
+        "depicting",
+        "displayed in",
+        "influencing"
       ]
     },
     {
       "category1": "Natural Landscapes",
-      "category2": "Everyday Objects",
+      "category2": "Sports and Fitness",
       "relations": [
-        "photographing a mountain with a smartphone",
-        "using a blanket to sit on grass in a park",
-        "carrying a water bottle while hiking through a forest",
-        "placing a picnic basket under a tree in a meadow",
-        "drawing a beach scene with a pencil in a notebook"
-      ]
-    },
-    {
-      "category1": "Sports and Fitness",
-      "category2": "Art and Culture",
-      "relations": [
-        "athletes posing for sculptures or paintings",
-        "sports events featuring live music or dance performances",
-        "fitness routines inspired by traditional cultural dances",
-        "art exhibitions showcasing sports photography",
-        "museums hosting sports memorabilia as part of cultural heritage"
+        "hiking through",
+        "cycling across",
+        "running along",
+        "practicing yoga in",
+        "kayaking on"
       ]
     },
     {
       "category1": "Food and Beverages",
       "category2": "Abstract and Conceptual Art",
       "relations": [
-        "inspiring abstract art through the colors and textures of food",
-        "serving beverages in artistically designed abstract glassware",
-        "creating edible installations mimicking conceptual art pieces",
-        "using food waste as a medium for abstract sculpture",
-        "displaying abstract art in a café to enhance the dining atmosphere"
+        "displaying on",
+        "inspired by",
+        "spilled on",
+        "arranged as",
+        "incorporated into"
       ]
     },
     {
       "category1": "Cities and Architecture",
       "category2": "Plants",
       "relations": [
-        "Cities incorporating vertical gardens into skyscrapers",
-        "Architects designing green roofs to support urban plant life",
-        "Parks and botanical gardens showcasing native plants within city landscapes",
-        "Urban planners planting trees along streets to improve air quality",
-        "Historical buildings being covered by climbing ivy or vines"
+        "planting in urban parks",
+        "growing on building facades",
+        "shading architectural structures",
+        "purifying air in cities",
+        "decorating interior spaces"
+      ]
+    },
+    {
+      "category1": "Animals",
+      "category2": "Technology and Industry",
+      "relations": [
+        "monitored by drones",
+        "tracked with GPS collars",
+        "bred using genetic engineering",
+        "detected by motion sensors",
+        "trained with automated feeders"
+      ]
+    },
+    {
+      "category1": "Cities and Architecture",
+      "category2": "Plants",
+      "relations": [
+        "planting in urban parks",
+        "growing on building facades",
+        "shading architectural structures",
+        "purifying air in cities",
+        "decorating interior spaces"
+      ]
+    },
+    {
+      "category1": "Everyday Objects",
+      "category2": "Transportation",
+      "relations": [
+        "placing on",
+        "storing in",
+        "transporting by",
+        "using as",
+        "attaching to"
+      ]
+    },
+    {
+      "category1": "Plants",
+      "category2": "Transportation",
+      "relations": [
+        "blocking roads",
+        "fueling vehicles",
+        "decorating vehicles",
+        "transporting plants",
+        "absorbing emissions"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Everyday Objects",
+      "relations": [
+        "photographing",
+        "blocking the view of",
+        "reflecting in",
+        "protecting from",
+        "inspiring the design of"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Cities and Architecture",
+      "relations": [
+        "surrounding",
+        "influencing",
+        "enhancing",
+        "contrasting with",
+        "inspiring"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Plants",
+      "relations": [
+        "supporting growth",
+        "sheltering",
+        "providing nutrients",
+        "eroding due to root systems",
+        "shaping through vegetation"
+      ]
+    },
+    {
+      "category1": "Plants",
+      "category2": "Abstract and Conceptual Art",
+      "relations": [
+        "inspiring",
+        "depicting",
+        "growing alongside",
+        "contrasting with",
+        "incorporated into"
+      ]
+    },
+    {
+      "category1": "Cities and Architecture",
+      "category2": "Animals",
+      "relations": [
+        "nesting on",
+        "inhabiting",
+        "destroying",
+        "migrating through",
+        "adapted to"
+      ]
+    },
+    {
+      "category1": "Plants",
+      "category2": "Everyday Objects",
+      "relations": [
+        "watered with",
+        "placed in",
+        "decorated with",
+        "photographed with",
+        "used to clean"
+      ]
+    },
+    {
+      "category1": "Food and Beverages",
+      "category2": "Art and Culture",
+      "relations": [
+        "depicting in paintings",
+        "displaying at exhibitions",
+        "serving at gallery openings",
+        "influencing culinary art",
+        "featuring in cultural festivals"
+      ]
+    },
+    {
+      "category1": "Animals",
+      "category2": "Art and Culture",
+      "relations": [
+        "depicted in",
+        "inspired by",
+        "featuring",
+        "symbolized in",
+        "performing with"
+      ]
+    },
+    {
+      "category1": "Cities and Architecture",
+      "category2": "Transportation",
+      "relations": [
+        "supporting public transit hubs",
+        "housing bike lanes",
+        "integrating parking structures",
+        "influencing traffic flow",
+        "hosting transportation museums"
+      ]
+    },
+    {
+      "category1": "Food and Beverages",
+      "category2": "Everyday Objects",
+      "relations": [
+        "storing in containers",
+        "serving on plates",
+        "pouring into glasses",
+        "wrapping in foil",
+        "cutting with knives"
+      ]
+    },
+    {
+      "category1": "Art and Culture",
+      "category2": "Abstract and Conceptual Art",
+      "relations": [
+        "influencing",
+        "critiquing",
+        "preserving",
+        "exhibiting",
+        "documenting"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Abstract and Conceptual Art",
+      "relations": [
+        "inspiring",
+        "depicting",
+        "reinterpreting",
+        "mirroring",
+        "transforming into"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Animals",
+      "relations": [
+        "inhabiting",
+        "migrating through",
+        "foraging in",
+        "nesting within",
+        "camouflaging against"
+      ]
+    },
+    {
+      "category1": "Art and Culture",
+      "category2": "Abstract and Conceptual Art",
+      "relations": [
+        "influencing",
+        "critiquing",
+        "preserving",
+        "exhibiting",
+        "documenting"
+      ]
+    },
+    {
+      "category1": "Technology and Industry",
+      "category2": "Abstract and Conceptual Art",
+      "relations": [
+        "inspiring",
+        "documenting",
+        "digitizing",
+        "critiquing",
+        "exhibiting"
+      ]
+    },
+    {
+      "category1": "Art and Culture",
+      "category2": "Everyday Objects",
+      "relations": [
+        "depicting",
+        "inspired by",
+        "created from",
+        "displaying",
+        "transforming into"
+      ]
+    },
+    {
+      "category1": "Food and Beverages",
+      "category2": "Transportation",
+      "relations": [
+        "transporting",
+        "selling inside",
+        "consuming during",
+        "delivering to",
+        "storing in"
+      ]
+    },
+    {
+      "category1": "Plants",
+      "category2": "Technology and Industry",
+      "relations": [
+        "monitoring growth",
+        "automating irrigation",
+        "genetically modifying",
+        "harvesting with machines",
+        "producing biofuels"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Transportation",
+      "relations": [
+        "crossing through",
+        "disrupting by",
+        "adapted to",
+        "preserved during",
+        "enhanced by"
+      ]
+    },
+    {
+      "category1": "Art and Culture",
+      "category2": "Technology and Industry",
+      "relations": [
+        "inspiring technological innovation",
+        "depicting industrial scenes",
+        "utilizing digital tools",
+        "preserving through archival technology",
+        "influencing product design"
+      ]
+    },
+    {
+      "category1": "Technology and Industry",
+      "category2": "Transportation",
+      "relations": [
+        "optimizing routes",
+        "fueling innovations",
+        "automating logistics",
+        "enhancing safety features",
+        "enabling data analytics"
+      ]
+    },
+    {
+      "category1": "Art and Culture",
+      "category2": "Transportation",
+      "relations": [
+        "depicting",
+        "influencing designs",
+        "hosting exhibits",
+        "featuring in advertisements",
+        "inspiring themed vehicles"
+      ]
+    },
+    {
+      "category1": "Cities and Architecture",
+      "category2": "Art and Culture",
+      "relations": [
+        "housing art museums",
+        "inspiring artistic movements",
+        "featuring public sculptures",
+        "hosting cultural festivals",
+        "preserving historical landmarks"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Art and Culture",
+      "relations": [
+        "inspiring paintings",
+        "depicted in literature",
+        "featured in photography",
+        "preserved in folklore",
+        "used as film settings"
+      ]
+    },
+    {
+      "category1": "Sports and Fitness",
+      "category2": "Technology and Industry",
+      "relations": [
+        "using wearable tech",
+        "analyzing performance data",
+        "streaming live events",
+        "manufacturing equipment",
+        "developing training software"
+      ]
+    },
+    {
+      "category1": "Sports and Fitness",
+      "category2": "Transportation",
+      "relations": [
+        "riding bicycles for exercise",
+        "transporting gym equipment in vehicles",
+        "jogging alongside roads",
+        "using public transport to reach sports events",
+        "carrying sports gear on bikes"
+      ]
+    },
+    {
+      "category1": "Food and Beverages",
+      "category2": "Technology and Industry",
+      "relations": [
+        "manufacturing packaging",
+        "automating production",
+        "monitoring freshness",
+        "distributing via drones",
+        "optimizing supply chains"
       ]
     },
     {
       "category1": "Sports and Fitness",
       "category2": "Abstract and Conceptual Art",
       "relations": [
-        "athletes drawing inspiration from abstract art for their performance routines",
-        "fitness trainers using conceptual art installations as motivational backdrops in gyms",
-        "artists creating abstract sculptures from repurposed sports equipment",
-        "sports teams commissioning abstract murals for their stadiums",
-        "yoga practitioners meditating in front of abstract art to enhance mindfulness"
+        "depicting in artwork",
+        "inspired by movement",
+        "displayed in gym",
+        "used as motivational imagery",
+        "incorporated into sportswear design"
+      ]
+    },
+    {
+      "category1": "Sports and Fitness",
+      "category2": "Art and Culture",
+      "relations": [
+        "inspiring artwork",
+        "depicted in murals",
+        "featured in films",
+        "celebrated in festivals",
+        "displayed in museums"
+      ]
+    },
+    {
+      "category1": "Cities and Architecture",
+      "category2": "Food and Beverages",
+      "relations": [
+        "hosting food markets",
+        "featuring rooftop restaurants",
+        "influencing culinary styles",
+        "housing breweries",
+        "displaying food-themed sculptures"
+      ]
+    },
+    {
+      "category1": "Cities and Architecture",
+      "category2": "Sports and Fitness",
+      "relations": [
+        "hosting marathons",
+        "building stadiums",
+        "designing park workout areas",
+        "planning bike lanes",
+        "incorporating rooftop sports facilities"
+      ]
+    },
+    {
+      "category1": "Food and Beverages",
+      "category2": "Sports and Fitness",
+      "relations": [
+        "consuming during workout",
+        "promoting on sports gear",
+        "sponsoring fitness events",
+        "fueling athletic performance",
+        "selling at sports venues"
+      ]
+    },
+    {
+      "category1": "Food and Beverages",
+      "category2": "Sports and Fitness",
+      "relations": [
+        "consuming during workout",
+        "promoting on sports gear",
+        "sponsoring fitness events",
+        "fueling athletic performance",
+        "selling at sports venues"
+      ]
+    },
+    {
+      "category1": "Sports and Fitness",
+      "category2": "Everyday Objects",
+      "relations": [
+        "wearing for exercise",
+        "using as equipment",
+        "carrying in a gym bag",
+        "holding during a workout",
+        "placing on a water bottle"
+      ]
+    },
+    {
+      "category1": "Plants",
+      "category2": "Sports and Fitness",
+      "relations": [
+        "planting in gym gardens",
+        "using bamboo for yoga mats",
+        "decorating stadiums with flowers",
+        "wearing hemp-based workout clothes",
+        "using aloe vera for post-workout recovery"
+      ]
+    },
+    {
+      "category1": "Cities and Architecture",
+      "category2": "Technology and Industry",
+      "relations": [
+        "powering skyscrapers",
+        "constructing with smart materials",
+        "optimizing traffic flow",
+        "designing energy-efficient buildings",
+        "integrating IoT in urban planning"
+      ]
+    },
+    {
+      "category1": "Natural Landscapes",
+      "category2": "Food and Beverages",
+      "relations": [
+        "growing in",
+        "harvested from",
+        "consumed while viewing",
+        "inspired by",
+        "paired with scenery"
       ]
     }
   ]

@@ -1,0 +1,20 @@
+# Main configuration for attribute generation
+model_name: "deepseek-v3-0324"  # LLM model to use
+system_prompt: ""  # Base system prompt
+
+# API configuration
+keys_path: "configs/keys.yaml"  # Path to API keys file
+max_concurrent_per_key: 300     # Max concurrent requests per API key
+max_retries: 5                  # Max retries for failed requests
+
+# Input/output configuration
+input_file: "assets/objects.json" # Input JSON file with object data
+output_file: "assets/attributes.json"  # Output file path
+
+# Generation control
+run_concept_generation: true    # Whether to run concept generation
+run_value_generation: true      # Whether to run value generation
+
+# Generation parameters
+concepts_per_object: 5          # Number of attribute concepts to generate per object
+values_per_concept: 10           # Number of values to generate per attribute concept

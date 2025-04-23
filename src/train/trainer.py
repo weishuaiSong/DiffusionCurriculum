@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
 from train.ordered_dataloader import CurriculumPromptLoader
 from train.scorer import VQAScorer
-from trl import DDPOConfig, DDPOTrainer, DefaultDDPOStableDiffusionPipeline
+from curriculum import Curriculum
+from typing import Any, Callable, Optional
+from trl import DDPOConfig, DDPOTrainer, DefaultDDPOStableDiffusionPipeline, DDPOStableDiffusionPipeline
+import torch
 
 
 @dataclass
@@ -15,15 +18,35 @@ class CurriculumTrainerArguments:
     hf_hub_model_id: str = field(
         default="ddpo-finetuned-stable-diffusion", metadata={"help": "HuggingFace repo to save model weights to"}
     )
-    hf_hub_aesthetic_model_id: str = field(
-        default="trl-lib/ddpo-aesthetic-predictor",
-        metadata={"help": "HuggingFace model ID for aesthetic scorer model weights"},
-    )
-    hf_hub_aesthetic_model_filename: str = field(
-        default="aesthetic-model.pth",
-        metadata={"help": "HuggingFace model filename for aesthetic scorer model weights"},
-    )
     use_lora: bool = field(default=True, metadata={"help": "Whether to use LoRA."})
+    curriculum_strategy: str = field(default="random", metadata={"help": "The curriculum strategy to use for training."})
+
+
+class DDPOCurriculumTrainer(DDPOTrainer):
+    def __init__(
+            self,
+            curriculum: Curriculum,
+            update_target_difficulty: Callable[[int], None],
+            config: DDPOConfig,
+            reward_function: Callable[[torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+            prompt_function: Callable[[], tuple[str, Any]],
+            sd_pipeline: DDPOStableDiffusionPipeline,
+            image_samples_hook: Optional[Callable[[Any, Any, Any], Any]] = None,
+    ):
+        super().__init__(config, reward_function, prompt_function, sd_pipeline, image_samples_hook)
+        self.curriculum = curriculum
+        self.update_target_difficulty = update_target_difficulty
+
+    def compute_rewards(self, prompt_image_pairs, is_async=False) -> list[torch.Tensor]:
+        rewards = super().compute_rewards(prompt_image_pairs, is_async)
+        metadata = {
+            "prompt_image_pairs": prompt_image_pairs,
+            "rewards": rewards,
+            "current_step": self.num_train_timesteps
+        }
+        target_difficulty = self.curriculum.infer_target_difficulty(metadata=metadata)
+        self.update_target_difficulty(target_difficulty)
+        return rewards
 
 
 class DiffusionCurriculumTrainer:
@@ -35,11 +58,14 @@ class DiffusionCurriculumTrainer:
             use_lora=curriculum_args.use_lora,
         )
         scorer_ = VQAScorer(curriculum_args.vqa_model, prompt_loader.set_difficulty)
-        self._trainer = DDPOTrainer(
-            ddpo_args,
-            scorer_.calc_score,
-            prompt_loader.next,
-            sd_pipeline,
+        self.curriculum = Curriculum(strategy=curriculum_args.curriculum_strategy)
+        self._trainer = DDPOCurriculumTrainer(
+            curriculum=self.curriculum,
+            update_target_difficulty=prompt_loader.set_difficulty,
+            config=ddpo_args,
+            reward_function=scorer_.calc_score,
+            prompt_function=prompt_loader.next,
+            sd_pipeline=sd_pipeline,
         )
 
     def train(self):

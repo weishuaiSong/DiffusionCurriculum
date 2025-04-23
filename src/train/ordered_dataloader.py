@@ -1,8 +1,9 @@
 from typing import Any
 import json
 from pathlib import Path
-from loguru import logger
+import logging
 
+logger = logging.getLogger(__name__)
 
 class CurriculumPromptLoader:
     def __init__(self, prompt_path: str) -> None:
