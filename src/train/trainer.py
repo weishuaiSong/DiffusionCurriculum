@@ -34,13 +34,12 @@ class DiffusionCurriculumTrainer:
             pretrained_model_revision=curriculum_args.pretrained_revision,
             use_lora=curriculum_args.use_lora,
         )
-        scorer_ = VQAScorer(curriculum_args.vqa_model)
+        scorer_ = VQAScorer(curriculum_args.vqa_model, prompt_loader.set_difficulty)
         self._trainer = DDPOTrainer(
             ddpo_args,
             scorer_.calc_score,
             prompt_loader.next,
             sd_pipeline,
-            image_samples_hook=image_outputs_logger,
         )
 
     def train(self):
