@@ -19,12 +19,17 @@ class CurriculumPromptLoader:
         return int(difficulty_str.split("_")[-1])
 
     def next(self) -> tuple[str, Any]:
-        if self.difficulty_to_prompts_idx[self.current_difficulty] >= len(self.difficulty_to_prompts[self.current_difficulty]):
+        if self.difficulty_to_prompts_idx[self.current_difficulty] >= len(
+            self.difficulty_to_prompts[self.current_difficulty]
+        ):
             logger.warning(f"difficulty {self.current_difficulty} has no more prompts, reset to 0")
             self.difficulty_to_prompts_idx[self.current_difficulty] = 0
-        prompt = self.difficulty_to_prompts[self.current_difficulty][self.difficulty_to_prompts_idx[self.current_difficulty]]
+        prompt = self.difficulty_to_prompts[self.current_difficulty][
+            self.difficulty_to_prompts_idx[self.current_difficulty]
+        ]
         self.difficulty_to_prompts_idx[self.current_difficulty] += 1
-        return prompt
+        return prompt["prompt"]
 
     def set_difficulty(self, difficulty: int) -> None:
         self.current_difficulty = difficulty
+

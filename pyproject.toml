@@ -3,6 +3,7 @@ name = "diff-curr"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "bert-score>=0.3.13",
     "loguru>=0.7.3",
     "openai>=0.28.0",
     "PyYAML>=6.0",
