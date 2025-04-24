@@ -80,26 +80,50 @@ class AttributeConceptGenerator:
         return parsed
 
     def _create_concept_prompts(
-            self,
-            objects: List[Dict[str, Any]],
-            concepts_per_object: int
-    ) -> List[str]:
-        """Create prompts for generating attribute concepts"""
-        return [
-            f"""Generate a JSON response with exactly {concepts_per_object} attribute concepts for the object '{obj['name']}'. 
-The response should follow this exact structure:
+                self,
+                objects: List[Dict[str, Any]],
+                concepts_per_object: int
+        ) -> List[str]:
+            """Create prompts for generating attribute concepts"""
+            return [
+                f"""Generate a JSON response with exactly {concepts_per_object} attribute concepts for the object '{obj['name']}'. 
+
+### Definition of Attribute Concept:
+An attribute concept is a generalizable characteristic or property that can describe objects, but not a specific instance of that characteristic. For example:
+- For a "car": 
+  - GOOD: "color" (concept), "engine type" (concept)
+  - BAD: "blue" (specific value), "V6" (specific value)
+- For a "book":
+  - GOOD: "genre", "cover type"
+  - BAD: "mystery", "hardcover"
+
+### Response Structure:
 {{
     "object_id": {obj['id']},
     "object_name": "{obj['name']}",
-    "attributes": ["concept1", "concept2", ...]
+    "attributes": ["concept1", "concept2", ...]  # Must be exactly {concepts_per_object} items
 }}
 
-## Requirements:
+### Requirements:
 1. Provide exactly {concepts_per_object} distinct attribute concepts
-2. Concepts should be relevant to the specific object
-3. Return ONLY the JSON dictionary
+2. Each concept must be:
+   - A general characteristic category (not a specific value)
+   - Relevant to the object's typical attributes
+   - Mutually distinct from other concepts in the list
+3. Concepts should be:
+   - Single words or short phrases (2-3 words max)
+   - In lowercase (unless proper nouns)
+   - Concrete and measurable when possible
+4. Return ONLY the valid JSON dictionary with no additional text
 
-## Object: {obj['name']}"""
+### Example for the "chair" object:
+{{
+    "object_id": 30,
+    "object_name": "chair",
+    "attributes": ["material", "leg style", "backrest- type", "armrest presence"]
+}}
+
+### Object to analyze: {obj['name']}"""
             for obj in objects
         ]
 
