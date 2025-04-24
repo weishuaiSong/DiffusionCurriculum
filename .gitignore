@@ -166,3 +166,6 @@ cython_debug/
 configs/keys.yaml
 
 test.ipynb
+
+prompt.json
+run.sh
