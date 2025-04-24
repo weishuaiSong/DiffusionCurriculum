@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import os
 from train.ordered_dataloader import CurriculumPromptLoader
 from train.scorer import VQAScorer
 from train.curriculum import Curriculum
@@ -61,6 +62,7 @@ class DiffusionCurriculumTrainer:
             use_lora=curriculum_args.use_lora,
         )
         scorer_ = VQAScorer(curriculum_args.vqa_model, prompt_loader.set_difficulty)
+        ddpo_args.project_kwargs = {"automatic_checkpoint_naming": True, "project_dir": os.getcwd()}
         self.curriculum = Curriculum(strategy=curriculum_args.curriculum_strategy)
         self._trainer = DDPOCurriculumTrainer(
             curriculum=self.curriculum,
