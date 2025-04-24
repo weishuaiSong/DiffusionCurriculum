@@ -1,8 +1,9 @@
 from typing import Any
 import random
 
-class Curriculum():
-    def __init__(self, strategy: str="random"):
+
+class Curriculum:
+    def __init__(self, strategy: str = "random"):
         self.strategy = strategy
 
     def infer_target_difficulty(self, metadata: dict[str, Any]) -> int:
@@ -20,4 +21,4 @@ class Curriculum():
         pass
 
     def _timestep_based_infer(self, metadata: dict[str, Any]) -> int:
-        pass
+        return max(metadata["current_step"] // 230 + 2, 22)

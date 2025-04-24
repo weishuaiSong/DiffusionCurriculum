@@ -14,7 +14,7 @@ class CurriculumTrainerArguments:
     pretrained_model: str = field(
         default="runwayml/stable-diffusion-v1-5", metadata={"help": "the pretrained model to use"}
     )
-    vqa_model: str = field(default="llavav1.6-7b", metadata={"help": "the pretrained model to use"})
+    vqa_model: str = field(default="llava-hf/llava-v1.6-vicuna-7b-hf", metadata={"help": "the pretrained model to use"})
     pretrained_revision: str = field(default="main", metadata={"help": "the pretrained model revision to use"})
     hf_hub_model_id: str = field(
         default="ddpo-finetuned-stable-diffusion", metadata={"help": "HuggingFace repo to save model weights to"}
