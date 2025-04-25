@@ -24,25 +24,27 @@ class VQAScorer:
             if isinstance(image, torch.Tensor):
                 image = to_pil(image)
             score = 0
+            all_qa = []
             for each_qa in qa:
-                response = self.vqa_pipeline(
-                    text=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "image": image,
-                                },
-                                {
-                                    "type": "text",
-                                    "text": each_qa["question"],
-                                },
-                            ],
-                        }
-                    ]
-                )  # type: ignore
-                answer = response[0]["generated_text"][-1]["content"]
-                score += 1 / len(qa) if is_answer_match(answer, each_qa["answer"]) else 0
-            scores.append(score)
+                all_qa.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "image": image,
+                            },
+                            {
+                                "type": "text",
+                                "text": each_qa["question"],
+                            },
+                        ],
+                    }
+                )
+            response = self.vqa_pipeline(text=all_qa)  # type: ignore
+
+            for i, resp in enumerate(response):
+                answer = resp[0]["generated_text"][-1]["content"]
+                score += 1 / len(qa) if is_answer_match(answer, qa[i]["answer"]) else 0
+                scores.append(score)
         return np.array(scores), None  # type: ignore
