@@ -44,7 +44,7 @@ class VQAScorer:
             response = self.vqa_pipeline(text=all_qa)  # type: ignore
 
             for i, resp in enumerate(response):
-                answer = resp[0]["generated_text"][-1]["content"]
+                answer = resp["generated_text"][-1]["content"]
                 score += 1 / len(qa) if is_answer_match(answer, qa[i]["answer"]) else 0
                 scores.append(score)
         return np.array(scores), None  # type: ignore
