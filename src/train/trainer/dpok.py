@@ -5,6 +5,7 @@ import logging
 import os
 import datetime
 from concurrent import futures
+from typing import Any, Callable, Optional
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
@@ -15,10 +16,12 @@ from diffusers.models.attention_processor import LoRAAttnProcessor
 from diffusers.schedulers import UNet2DConditionModel
 import numpy as np
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from train.curriculum import Curriculum
 from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 import torch
 from train.trainer.common.state_tracker import PerPromptStatTracker
+from trl.models import DDPOStableDiffusionPipeline
 import wandb
 from functools import partial
 import tqdm
@@ -141,7 +144,16 @@ class Config:
 
 
 class Trainer:
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        curriculum: Curriculum,
+        update_target_difficulty: Callable[[int], None],
+        config: Config,
+        reward_function: Callable[[torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+        prompt_function: Callable[[], tuple[str, Any]],
+    ) -> None:
+        self.curriculum = curriculum
+        self.update_target_difficulty = update_target_difficulty
         self.config = config
         unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
         self.run_name = f"dpok_{unique_id}"
@@ -250,10 +262,8 @@ class Trainer:
             eps=self.config.adam_epsilon,
         )
 
-        # prepare prompt and reward fn
-        # TODO:
-        self.prompt_fn = getattr(d3po_pytorch.prompts, config.prompt_fn)
-        self.reward_fn = getattr(d3po_pytorch.rewards, config.reward_fn)()
+        self.prompt_fn = prompt_function
+        self.reward_fn = reward_function
 
         # generate negative prompt embeddings
         neg_prompt_embed = self.sd_pipeline.text_encoder(
