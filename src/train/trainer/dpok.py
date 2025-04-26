@@ -574,7 +574,11 @@ class Trainer:
                     position=0,
                     disable=not self.accelerator.is_local_main_process,
                 ):
-                    embeds = sample["prompt_embeds"]
+                    if self.config.train_cfg:
+                        # concat negative prompts to sample prompts to avoid two forward passes
+                        embeds = torch.cat([self.train_neg_prompt_embeds, sample["prompt_embeds"]])
+                    else:
+                        embeds = sample["prompt_embeds"]
 
                     for j in t(
                         range(self.num_train_timesteps),
@@ -585,9 +589,21 @@ class Trainer:
                     ):
                         with self.accelerator.accumulate(self.sd_pipeline.unet):
                             with self.autocast():
-                                noise_pred = self.sd_pipeline.unet(
-                                    sample["latents"][:, j], sample["timesteps"][:, j], embeds
-                                ).sample
+                                if self.config.train_cfg:
+                                    noise_pred = self.sd_pipeline.unet(
+                                        torch.cat([sample["latents"][:, j]] * 2),
+                                        torch.cat([sample["timesteps"][:, j]] * 2),
+                                        embeds,
+                                    ).sample
+                                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                                    noise_pred = noise_pred_uncond + self.config.sample_guidance_scale * (
+                                        noise_pred_text - noise_pred_uncond
+                                    )
+                                else:
+                                    noise_pred = pipeline.unet(
+                                        sample["latents"][:, j], sample["timesteps"][:, j], embeds
+                                    ).sample
+
                                 # compute the log prob of next_latents given latents under the current model
                                 _, log_prob = ddim_step_with_logprob(
                                     self.sd_pipeline.scheduler,
