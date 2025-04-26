@@ -18,6 +18,7 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 import torch
+from train.trainer.common.state_tracker import PerPromptStatTracker
 import wandb
 from functools import partial
 import tqdm
@@ -155,6 +156,12 @@ class Trainer:
             automatic_checkpoint_naming=True,
             total_limit=self.config.num_checkpoint_limit,
         )
+        self.stat_tracker = None
+        if config.per_prompt_stat_tracking:
+            self.stat_tracker = PerPromptStatTracker(
+                config.per_prompt_stat_tracking_buffer_size,
+                config.per_prompt_stat_tracking_min_count,
+            )
 
         self.accelerator = Accelerator(
             log_with="wandb",
@@ -162,7 +169,7 @@ class Trainer:
             # we always accumulate gradients across timesteps; we want config.train.gradient_accumulation_steps to be the
             # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
             # the total number of optimizer steps to accumulate across.
-            gradient_accumulation_steps=self.config.gradient_accumulation_steps * num_train_timesteps,
+            gradient_accumulation_steps=self.config.gradient_accumulation_steps * self.num_train_timesteps,
         )
         self.available_devices = self.accelerator.num_processes
         if self.accelerator.is_main_process:
@@ -512,7 +519,14 @@ class Trainer:
                     step=global_step,
                 )
 
-            advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+            # per-prompt mean/std tracking
+            if self.stat_tracker:
+                # gather the prompts across processes
+                prompt_ids = self.accelerator.gather(samples["prompt_ids"]).cpu().numpy()
+                prompts = self.sd_pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
+                advantages = self.stat_tracker.update(prompts, rewards)
+            else:
+                advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
             # ungather advantages; we only need to keep the entries corresponding to the samples on this process
             samples["advantages"] = (
