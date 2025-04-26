@@ -10,7 +10,7 @@ dependencies = [
     "PyYAML>=6.0",
     "sentencepiece>=0.2.0",
     "torchvision>=0.21.0",
-    "transformers>=4.51.3",
+    "transformers==4.48.3",
     "trl>=0.16.1",
     "wandb>=0.19.9",
 ]

@@ -21,4 +21,4 @@ class Curriculum:
         pass
 
     def _timestep_based_infer(self, metadata: dict[str, Any]) -> int:
-        return min(metadata["current_step"] // 230 + 3, 22)
+        return min(metadata["current_step"] // 32 + 3, 22)

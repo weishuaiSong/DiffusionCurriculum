@@ -22,31 +22,35 @@ class VQAScorer:
         to_pil = ToPILImage()
 
         for i, image in enumerate(images):
-            qa: list[dict[str, str]] = metadata[i]["qa"]["object"]
+            qa: list[dict[str, str]] = (
+                metadata[i]["qa"]["object"] + metadata[i]["qa"]["relation"] + metadata[i]["qa"]["attribute"]
+            )
             if isinstance(image, torch.Tensor):
                 image = to_pil(image)
             score = 0
             all_qa = []
             for each_qa in qa:
                 all_qa.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "image": image,
-                            },
-                            {
-                                "type": "text",
-                                "text": each_qa["question"],
-                            },
-                        ],
-                    }
+                    [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "image": image,
+                                },
+                                {
+                                    "type": "text",
+                                    "text": each_qa["question"],
+                                },
+                            ],
+                        }
+                    ]
                 )
             response = self.vqa_pipeline(text=all_qa)  # type: ignore
 
             for i, resp in enumerate(response):
-                answer = resp["generated_text"][-1]["content"]
+                answer = resp[0]["generated_text"][-1]["content"]
                 score += 1 / len(qa) if is_answer_match(answer, qa[i]["answer"]) else 0
                 scores.append(score)
         return np.array(scores), None  # type: ignore
