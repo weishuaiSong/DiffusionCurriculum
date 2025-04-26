@@ -588,92 +588,8 @@ class Trainer:
                     position=0,
                     disable=not self.accelerator.is_local_main_process,
                 ):
-                    if self.config.train_cfg:
-                        # concat negative prompts to sample prompts to avoid two forward passes
-                        embeds = torch.cat([self.train_neg_prompt_embeds, sample["prompt_embeds"]])
-                    else:
-                        embeds = sample["prompt_embeds"]
-
-                    for j in t(
-                        range(self.num_train_timesteps),
-                        desc="Timestep",
-                        position=1,
-                        leave=False,
-                        disable=not self.accelerator.is_local_main_process,
-                    ):
-                        with self.accelerator.accumulate(self.sd_pipeline.unet):
-                            with self.autocast():
-                                if self.config.train_cfg:
-                                    noise_pred = self.sd_pipeline.unet(
-                                        torch.cat([sample["latents"][:, j]] * 2),
-                                        torch.cat([sample["timesteps"][:, j]] * 2),
-                                        embeds,
-                                    ).sample
-                                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                                    noise_pred = noise_pred_uncond + self.config.sample_guidance_scale * (
-                                        noise_pred_text - noise_pred_uncond
-                                    )
-                                else:
-                                    noise_pred = self.sd_pipeline.unet(
-                                        sample["latents"][:, j], sample["timesteps"][:, j], embeds
-                                    ).sample
-
-                                # compute the log prob of next_latents given latents under the current model
-                                _, log_prob = ddim_step_with_logprob(
-                                    self.sd_pipeline.scheduler,
-                                    noise_pred,
-                                    sample["timesteps"][:, j],
-                                    sample["latents"][:, j],
-                                    eta=self.config.sample_eta,
-                                    prev_sample=sample["next_latents"][:, j],
-                                )
-
-                            # ppo logic
-                            advantages = torch.clamp(
-                                sample["advantages"], -self.config.train_adv_clip_max, self.config.train_adv_clip_max
-                            )
-                            ratio = torch.exp(log_prob - sample["log_probs"][:, j])
-                            unclipped_loss = -advantages * ratio
-                            clipped_loss = -advantages * torch.clamp(
-                                ratio, 1.0 - self.config.train_clip_range, 1.0 + self.config.train_clip_range
-                            )
-                            loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
-                            kl_divergence = kl.kl_divergence(
-                                torch.distributions.Categorical(logits=log_prob),
-                                torch.distributions.Categorical(logits=sample["log_probs"][:, j]),
-                            )
-                            loss += self.config.kl_ratio * kl_divergence.mean()
-                            # debugging values
-                            # John Schulman says that (ratio - 1) - log(ratio) is a better
-                            # estimator, but most existing code uses this so...
-                            # http://joschu.net/blog/kl-approx.html
-                            info["approx_kl"].append(0.5 * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2))
-                            info["clipfrac"].append(
-                                torch.mean((torch.abs(ratio - 1.0) > self.config.train_clip_range).float())
-                            )
-                            info["loss"].append(loss)
-
-                            # backward pass
-                            self.accelerator.backward(loss)
-                            if self.accelerator.sync_gradients:
-                                self.accelerator.clip_grad_norm_(
-                                    self.sd_pipeline.unet.parameters(), self.config.train_max_grad_norm
-                                )
-                            self.optimizer.step()
-                            self.optimizer.zero_grad()
-
-                        # Checks if the accelerator has performed an optimization step behind the scenes
-                        if self.accelerator.sync_gradients:
-                            assert (j == self.num_train_timesteps - 1) and (
-                                i + 1
-                            ) % self.config.gradient_accumulation_steps == 0
-                            # log training-related stuff
-                            info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
-                            info = self.accelerator.reduce(info, reduction="mean")
-                            info.update({"epoch": epoch, "inner_epoch": inner_epoch})
-                            self.accelerator.log(info, step=global_step)
-                            global_step += 1
-                            info = defaultdict(list)
+                    self.step(sample, i, epoch, inner_epoch, global_step, info)
+                    global_step += 1
 
                 # make sure we did an optimization step at the end of the inner epoch
                 assert self.accelerator.sync_gradients
@@ -681,4 +597,85 @@ class Trainer:
             if epoch != 0 and epoch % self.config.save_freq == 0 and self.accelerator.is_main_process:
                 self.accelerator.save_state()
 
-    def step(self): ...
+    def step(self, sample: dict, step: int, epoch: int, inner_epoch: int, global_step: int, info: dict):
+        if self.config.train_cfg:
+            # concat negative prompts to sample prompts to avoid two forward passes
+            embeds = torch.cat([self.train_neg_prompt_embeds, sample["prompt_embeds"]])
+        else:
+            embeds = sample["prompt_embeds"]
+
+        for j in t(
+            range(self.num_train_timesteps),
+            desc="Timestep",
+            position=1,
+            leave=False,
+            disable=not self.accelerator.is_local_main_process,
+        ):
+            with self.accelerator.accumulate(self.sd_pipeline.unet):
+                with self.autocast():
+                    if self.config.train_cfg:
+                        noise_pred = self.sd_pipeline.unet(
+                            torch.cat([sample["latents"][:, j]] * 2),
+                            torch.cat([sample["timesteps"][:, j]] * 2),
+                            embeds,
+                        ).sample
+                        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                        noise_pred = noise_pred_uncond + self.config.sample_guidance_scale * (
+                            noise_pred_text - noise_pred_uncond
+                        )
+                    else:
+                        noise_pred = self.sd_pipeline.unet(
+                            sample["latents"][:, j], sample["timesteps"][:, j], embeds
+                        ).sample
+
+                    # compute the log prob of next_latents given latents under the current model
+                    _, log_prob = ddim_step_with_logprob(
+                        self.sd_pipeline.scheduler,
+                        noise_pred,
+                        sample["timesteps"][:, j],
+                        sample["latents"][:, j],
+                        eta=self.config.sample_eta,
+                        prev_sample=sample["next_latents"][:, j],
+                    )
+
+                # ppo logic
+                advantages = torch.clamp(
+                    sample["advantages"], -self.config.train_adv_clip_max, self.config.train_adv_clip_max
+                )
+                ratio = torch.exp(log_prob - sample["log_probs"][:, j])
+                unclipped_loss = -advantages * ratio
+                clipped_loss = -advantages * torch.clamp(
+                    ratio, 1.0 - self.config.train_clip_range, 1.0 + self.config.train_clip_range
+                )
+                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+                kl_divergence = kl.kl_divergence(
+                    torch.distributions.Categorical(logits=log_prob),
+                    torch.distributions.Categorical(logits=sample["log_probs"][:, j]),
+                )
+                loss += self.config.kl_ratio * kl_divergence.mean()
+                # debugging values
+                # John Schulman says that (ratio - 1) - log(ratio) is a better
+                # estimator, but most existing code uses this so...
+                # http://joschu.net/blog/kl-approx.html
+                info["approx_kl"].append(0.5 * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2))
+                info["clipfrac"].append(torch.mean((torch.abs(ratio - 1.0) > self.config.train_clip_range).float()))
+                info["loss"].append(loss)
+
+                # backward pass
+                self.accelerator.backward(loss)
+                if self.accelerator.sync_gradients:
+                    self.accelerator.clip_grad_norm_(
+                        self.sd_pipeline.unet.parameters(), self.config.train_max_grad_norm
+                    )
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
+            # Checks if the accelerator has performed an optimization step behind the scenes
+            if self.accelerator.sync_gradients:
+                assert (j == self.num_train_timesteps - 1) and (step + 1) % self.config.gradient_accumulation_steps == 0
+                # log training-related stuff
+                info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
+                info = self.accelerator.reduce(info, reduction="mean")
+                info.update({"epoch": epoch, "inner_epoch": inner_epoch})
+                self.accelerator.log(info, step=global_step)
+                info = defaultdict(list)
