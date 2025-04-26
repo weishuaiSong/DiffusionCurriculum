@@ -21,7 +21,6 @@ from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 import torch
 from train.trainer.common.state_tracker import PerPromptStatTracker
-from trl.models import DDPOStableDiffusionPipeline
 import wandb
 from functools import partial
 import tqdm
@@ -375,159 +374,164 @@ class Trainer:
         )
         logger.info(f"  Number of inner epochs = {self.config.num_inner_epochs}")
 
-    def epoch_loop(self):
-        assert self.accelerator
-        global_step = 0
-        for epoch in range(self.first_epoch, self.config.num_epochs):
-            #################### SAMPLING ####################
-            self.sd_pipeline.unet.eval()
-            samples = []
-            prompts = []
-            for i in t(
-                range(self.config.sample_num_batches_per_epoch),
-                desc=f"Epoch {epoch}: sampling",
-                disable=not self.accelerator.is_local_main_process,
-                position=0,
-            ):
-                # generate prompts
-                prompts, prompt_metadata = zip(*[self.prompt_fn() for _ in range(self.config.sample_batch_size)])
+    def _sample(self, epoch: int, global_step: int):
+        samples: list[dict] = []
+        prompts = []
+        for _ in t(
+            range(self.config.sample_num_batches_per_epoch),
+            desc=f"Epoch {epoch}: sampling",
+            disable=not self.accelerator.is_local_main_process,
+            position=0,
+        ):
+            # generate prompts
+            prompts, prompt_metadata = zip(*[self.prompt_fn() for _ in range(self.config.sample_batch_size)])
+
+            # encode prompts
+            prompt_ids = self.sd_pipeline.tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding="max_length",
+                truncation=True,
+                max_length=self.sd_pipeline.tokenizer.model_max_length,
+            ).input_ids.to(self.accelerator.device)
+            prompt_embeds = self.sd_pipeline.text_encoder(prompt_ids)[0]
+
+            # sample
+            with self.autocast():
+                images, _, latents, log_probs = pipeline_with_logprob(
+                    self.sd_pipeline,
+                    prompt_embeds=prompt_embeds,
+                    negative_prompt_embeds=self.sample_neg_prompt_embeds,
+                    num_inference_steps=self.config.sample_num_step,
+                    guidance_scale=self.config.sample_guidance_scale,
+                    eta=self.config.sample_eta,
+                    output_type="pt",
+                )
+
+            latents = torch.stack(latents, dim=1)  # (batch_size, num_steps + 1, 4, 64, 64)
+            log_probs = torch.stack(log_probs, dim=1)  # (batch_size, num_steps, 1)
+            timesteps = self.sd_pipeline.scheduler.timesteps.repeat(
+                self.config.sample_batch_size, 1
+            )  # (batch_size, num_steps)
+
+            # compute rewards asynchronously
+            rewards = self.executor.submit(self.reward_fn, images, prompts, prompt_metadata)
+            # yield to to make sure reward computation starts
+            eval_rewards = None
+            if epoch % self.config.eval_epoch == 0:
+                eval_prompts, eval_prompt_metadata = zip(
+                    *[self.prompt_fn() for _ in range(self.config.sample_batch_size)]
+                )
 
                 # encode prompts
-                prompt_ids = self.sd_pipeline.tokenizer(
-                    prompts,
+                eval_prompt_ids = self.sd_pipeline.tokenizer(
+                    eval_prompts,
                     return_tensors="pt",
                     padding="max_length",
                     truncation=True,
                     max_length=self.sd_pipeline.tokenizer.model_max_length,
                 ).input_ids.to(self.accelerator.device)
-                prompt_embeds = self.sd_pipeline.text_encoder(prompt_ids)[0]
-
+                eval_prompt_embeds = self.sd_pipeline.text_encoder(eval_prompt_ids)[0]
+                eval_sample_neg_prompt_embeds = self.sample_neg_prompt_embeds.repeat(
+                    self.config.sample_batch_size, 1, 1
+                )
                 # sample
                 with self.autocast():
-                    images, _, latents, log_probs = pipeline_with_logprob(
+                    eval_images, _, _, _ = pipeline_with_logprob(
                         self.sd_pipeline,
-                        prompt_embeds=prompt_embeds,
-                        negative_prompt_embeds=self.sample_neg_prompt_embeds,
+                        prompt_embeds=eval_prompt_embeds,
+                        negative_prompt_embeds=eval_sample_neg_prompt_embeds,
                         num_inference_steps=self.config.sample_num_step,
                         guidance_scale=self.config.sample_guidance_scale,
                         eta=self.config.sample_eta,
                         output_type="pt",
                     )
 
-                latents = torch.stack(latents, dim=1)  # (batch_size, num_steps + 1, 4, 64, 64)
-                log_probs = torch.stack(log_probs, dim=1)  # (batch_size, num_steps, 1)
-                timesteps = self.sd_pipeline.scheduler.timesteps.repeat(
-                    self.config.sample_batch_size, 1
-                )  # (batch_size, num_steps)
-
                 # compute rewards asynchronously
-                rewards = self.executor.submit(self.reward_fn, images, prompts, prompt_metadata)
-                # yield to to make sure reward computation starts
-                eval_rewards = None
-                if epoch % self.config.eval_epoch == 0:
-                    eval_prompts, eval_prompt_metadata = zip(
-                        *[self.prompt_fn() for _ in range(self.config.sample_batch_size)]
-                    )
+                eval_rewards = self.executor.submit(self.reward_fn, eval_images, eval_prompts, eval_prompt_metadata)
 
-                    # encode prompts
-                    eval_prompt_ids = self.sd_pipeline.tokenizer(
-                        eval_prompts,
-                        return_tensors="pt",
-                        padding="max_length",
-                        truncation=True,
-                        max_length=self.sd_pipeline.tokenizer.model_max_length,
-                    ).input_ids.to(self.accelerator.device)
-                    eval_prompt_embeds = self.sd_pipeline.text_encoder(eval_prompt_ids)[0]
-                    eval_sample_neg_prompt_embeds = self.sample_neg_prompt_embeds.repeat(
-                        self.config.sample_batch_size, 1, 1
-                    )
-                    # sample
-                    with self.autocast():
-                        eval_images, _, _, _ = pipeline_with_logprob(
-                            self.sd_pipeline,
-                            prompt_embeds=eval_prompt_embeds,
-                            negative_prompt_embeds=eval_sample_neg_prompt_embeds,
-                            num_inference_steps=self.config.sample_num_step,
-                            guidance_scale=self.config.sample_guidance_scale,
-                            eta=self.config.sample_eta,
-                            output_type="pt",
-                        )
-
-                    # compute rewards asynchronously
-                    eval_rewards = self.executor.submit(self.reward_fn, eval_images, eval_prompts, eval_prompt_metadata)
-
-                samples.append(
-                    {
-                        "prompt_ids": prompt_ids,
-                        "prompt_embeds": prompt_embeds,
-                        "timesteps": timesteps,
-                        "latents": latents[:, :-1],  # each entry is the latent before timestep t
-                        "next_latents": latents[:, 1:],  # each entry is the latent after timestep t
-                        "log_probs": log_probs,
-                        "rewards": rewards,
-                        "eval_rewards": eval_rewards,
-                    }
-                )
-
-            # wait for all rewards to be computed
-            for sample in t(
-                samples,
-                desc="Waiting for rewards",
-                disable=not self.accelerator.is_local_main_process,
-                position=0,
-            ):
-                rewards, reward_metadata = sample["rewards"].result()
-                # accelerator.print(reward_metadata)
-                sample["rewards"] = torch.as_tensor(rewards, device=self.accelerator.device)
-                if sample["eval_rewards"] is not None:
-                    eval_rewards, eval_reward_metadata = sample["eval_rewards"].result()
-                    sample["eval_rewards"] = torch.as_tensor(rewards, device=self.accelerator.device)
-                else:
-                    del sample["eval_rewards"]
-
-            # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
-            samples = {k: torch.cat([s[k] for s in samples]) for k in samples[0].keys()}
-
-            # gather rewards across processes
-            rewards = self.accelerator.gather(samples["rewards"]).cpu().numpy()
-
-            # log rewards and images
-            if samples.get("eval_rewards") is not None:
-                eval_rewards = self.accelerator.gather(samples["eval_rewards"]).cpu().numpy()
-                self.accelerator.log(
-                    {
-                        "reward": eval_rewards,
-                        "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
-                        "reward_mean": eval_rewards.mean(),
-                        "reward_std": eval_rewards.std(),
-                    },
-                    step=global_step,
-                )
+            samples.append(
+                {
+                    "prompt_ids": prompt_ids,
+                    "prompt_embeds": prompt_embeds,
+                    "timesteps": timesteps,
+                    "latents": latents[:, :-1],  # each entry is the latent before timestep t
+                    "next_latents": latents[:, 1:],  # each entry is the latent after timestep t
+                    "log_probs": log_probs,
+                    "rewards": rewards,
+                    "eval_rewards": eval_rewards,
+                }
+            )
+        # wait for all rewards to be computed
+        for sample in t(
+            samples,
+            desc="Waiting for rewards",
+            disable=not self.accelerator.is_local_main_process,
+            position=0,
+        ):
+            rewards, reward_metadata = sample["rewards"].result()
+            # accelerator.print(reward_metadata)
+            sample["rewards"] = torch.as_tensor(rewards, device=self.accelerator.device)
+            if sample["eval_rewards"] is not None:
+                eval_rewards, eval_reward_metadata = sample["eval_rewards"].result()
+                sample["eval_rewards"] = torch.as_tensor(rewards, device=self.accelerator.device)
             else:
-                self.accelerator.log(
-                    {
-                        "reward": rewards,
-                        "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
-                        "reward_mean": rewards.mean(),
-                        "reward_std": rewards.std(),
-                    },
-                    step=global_step,
-                )
-            # this is a hack to force wandb to log the images as JPEGs instead of PNGs
-            with tempfile.TemporaryDirectory() as tmpdir:
-                for i, image in enumerate(images):
-                    pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
-                    pil = pil.resize((256, 256))
-                    pil.save(os.path.join(tmpdir, f"{i}.jpg"))
-                self.accelerator.log(
-                    {
-                        "images": [
-                            wandb.Image(os.path.join(tmpdir, f"{i}.jpg"), caption=f"{prompt:.25} | {reward:.2f}")
-                            for i, (prompt, reward) in enumerate(zip(prompts, rewards))
-                        ],
-                    },
-                    step=global_step,
-                )
+                del sample["eval_rewards"]
+
+        # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
+        zip_samples = {k: torch.cat([s[k] for s in samples]) for k in samples[0].keys()}
+
+        # gather rewards across processes
+        rewards = self.accelerator.gather(zip_samples["rewards"]).cpu().numpy()
+
+        # log rewards and images
+        if zip_samples.get("eval_rewards") is not None:
+            eval_rewards = self.accelerator.gather(zip_samples["eval_rewards"]).cpu().numpy()
+            self.accelerator.log(
+                {
+                    "reward": eval_rewards,
+                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
+                    "reward_mean": eval_rewards.mean(),
+                    "reward_std": eval_rewards.std(),
+                },
+                step=global_step,
+            )
+        else:
+            self.accelerator.log(
+                {
+                    "reward": rewards,
+                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
+                    "reward_mean": rewards.mean(),
+                    "reward_std": rewards.std(),
+                },
+                step=global_step,
+            )
+        # this is a hack to force wandb to log the images as JPEGs instead of PNGs
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i, image in enumerate(images):
+                pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+                pil = pil.resize((256, 256))
+                pil.save(os.path.join(tmpdir, f"{i}.jpg"))
+            self.accelerator.log(
+                {
+                    "images": [
+                        wandb.Image(os.path.join(tmpdir, f"{i}.jpg"), caption=f"{prompt:.25} | {reward:.2f}")
+                        for i, (prompt, reward) in enumerate(zip(prompts, rewards))
+                    ],
+                },
+                step=global_step,
+            )
+
+        return zip_samples, prompts, rewards
+
+    def epoch_loop(self):
+        assert self.accelerator
+        global_step = 0
+        for epoch in range(self.first_epoch, self.config.num_epochs):
+            #################### SAMPLING ####################
+            self.sd_pipeline.unet.eval()
+
+            samples, prompts, rewards = self._sample(epoch, global_step)
 
             # per-prompt mean/std tracking
             if self.stat_tracker:
@@ -610,7 +614,7 @@ class Trainer:
                                         noise_pred_text - noise_pred_uncond
                                     )
                                 else:
-                                    noise_pred = pipeline.unet(
+                                    noise_pred = self.sd_pipeline.unet(
                                         sample["latents"][:, j], sample["timesteps"][:, j], embeds
                                     ).sample
 

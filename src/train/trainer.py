@@ -4,6 +4,7 @@ from train.ordered_dataloader import CurriculumPromptLoader
 from train.scorer import VQAScorer
 from train.curriculum import Curriculum
 from typing import Any, Callable, Optional
+from train.trainer import dpok
 from trl.models.modeling_sd_base import DefaultDDPOStableDiffusionPipeline, DDPOStableDiffusionPipeline
 from train.trainer.ddpo import DDPOConfig, DDPOTrainer
 import torch
@@ -35,21 +36,15 @@ class CurriculumTrainerArguments:
 class DiffusionCurriculumTrainer:
     def __init__(self, curriculum_args: CurriculumTrainerArguments, ddpo_args: DDPOConfig) -> None:
         prompt_loader = CurriculumPromptLoader(prompt_path=curriculum_args.prompt_filename)
-        sd_pipeline = DefaultDDPOStableDiffusionPipeline(
-            curriculum_args.pretrained_model,
-            pretrained_model_revision=curriculum_args.pretrained_revision,
-            use_lora=curriculum_args.use_lora,
-        )
         scorer_ = VQAScorer(curriculum_args.vqa_model, prompt_loader.set_difficulty)
         ddpo_args.project_kwargs = {"automatic_checkpoint_naming": True, "project_dir": os.getcwd()}
         self.curriculum = Curriculum(strategy=curriculum_args.curriculum_strategy)
-        self._trainer = DDPOCurriculumTrainer(
+        self._trainer = dpok.Trainer(
             curriculum=self.curriculum,
             update_target_difficulty=prompt_loader.set_difficulty,
             config=ddpo_args,
             reward_function=scorer_.calc_score,
             prompt_function=prompt_loader.next,
-            sd_pipeline=sd_pipeline,
         )
 
     def train(self):
