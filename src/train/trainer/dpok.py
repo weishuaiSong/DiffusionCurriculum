@@ -32,34 +32,111 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Config:
-    resume_from: str | None = field(default=None)
-    num_epochs: int = field(default=100)
-    sample_batch_size: int = field(default=16)
-    train_batch_size: int = field(default=16)
-    gradient_accumulation_steps: int = field(default=1)
-    num_inner_epochs: int = field(default=1)
     sample_num_step: int = field(default=50)
     train_num_step: int = field(default=1000)
     timestep_fraction: float = field(default=0.8)
     log_dir: str = field(default="logs")
-    num_checkpoint_limit: int = field(default=10)
-    seed: int | None = field(default=None)
-    use_lora: bool = field(default=False)
-    sd_model: str = field(default="CompVis/stable-diffusion-v1-4")
-    sd_revision: str | None = field(default=None)
+    sd_model: str = field(default="runwayml/stable-diffusion-v1-5")
+    sd_revision: str = field(default="main")
     learning_rate: float = field(default=1e-4)
-    adam_beta1: float = field(default=0.9)
-    adam_beta2: float = field(default=0.999)
-    adam_weight_decay: float = field(default=0.01)
-    adam_epsilon: float = field(default=1e-8)
-    sample_num_batches_per_epoch: int = field(default=10)
-    sample_guidance_scale: float = field(default=7.5)
-    sample_eta: float = field(default=0.0)
     eval_epoch: int = field(default=2)
-    train_clip_range: float = field(default=0.2)
-    train_max_grad_norm: float = field(default=1.0)
-    kl_ratio: float = field(default=0.01)
-    save_freq: int = field(default=10)
+
+    # random seed for reproducibility.
+    seed = 0
+    # top-level logging directory for checkpoint saving.
+    logdir = "logs"
+    # number of epochs to train for. each epoch is one round of sampling from the model followed by training on those samples.
+    num_epochs = 400
+    # number of epochs between saving model checkpoints.
+    save_freq = 400
+    # number of checkpoints to keep before overwriting old ones.
+    num_checkpoint_limit = 10
+    # mixed precision training. options are "fp16", "bf16", and "no". half-precision speeds up training significantly.
+    mixed_precision = "fp16"
+    # allow tf32 on Ampere GPUs, which can speed up training.
+    allow_tf32 = True
+    # resume training from a checkpoint. either an exact checkpoint directory (e.g. checkpoint_50), or a directory
+    # containing checkpoints, in which case the latest one will be used. `use_lora` must be set to the same value
+    # as the run that generated the saved checkpoint.
+    resume_from = ""
+    # whether or not to use LoRA. LoRA reduces memory usage significantly by injecting small weight matrices into the
+    # attention layers of the UNet. with LoRA, fp16, and a batch size of 1, finetuning Stable Diffusion should take
+    # about 10GB of GPU memory. beware that if LoRA is disabled, training will take a lot of memory and saved checkpoint
+    # files will also be large.
+    use_lora = True
+    # whether or not to use xFormers to reduce memory usage.
+    use_xformers = False
+
+    ############ Sampling ############
+    # number of sampler inference steps.
+    sample_num_steps = 20
+    # eta parameter for the DDIM sampler. this controls the amount of noise injected into the sampling process, with 0.0
+    # being fully deterministic and 1.0 being equivalent to the DDPM sampler.
+    sample_eta = 1.0
+    # classifier-free guidance weight. 1.0 is no guidance.
+    sample_guidance_scale = 5.0
+    # batch size (per GPU!) to use for sampling.
+    sample_batch_size = 10
+    # number of batches to sample per epoch. the total number of samples per epoch is `num_batches_per_epoch *
+    # batch_size * num_gpus`.
+    sample_num_batches_per_epoch = 2
+    # save interval
+    sample_save_interval = 100
+
+    ############ Training ############
+    # batch size (per GPU!) to use for training.
+    train_batch_size = 1
+    # learning rate.
+    train_learning_rate = 3e-5
+    # Adam beta1.
+    adam_beta1 = 0.9
+    # Adam beta2.
+    adam_beta2 = 0.999
+    # Adam weight decay.
+    adam_weight_decay = 1e-4
+    # Adam epsilon.
+    adam_epsilon = 1e-8
+    # number of gradient accumulation steps. the effective batch size is `batch_size * num_gpus *
+    # gradient_accumulation_steps`.
+    gradient_accumulation_steps = 1
+    # maximum gradient norm for gradient clipping.
+    train_max_grad_norm = 1.0
+    # number of inner epochs per outer epoch. each inner epoch is one iteration through the data collected during one
+    # outer epoch's round of sampling.
+    num_inner_epochs = 1
+    # whether or not to use classifier-free guidance during training. if enabled, the same guidance scale used during
+    # sampling will be used during training.
+    train_cfg = True
+    # clip advantages to the range [-adv_clip_max, adv_clip_max].
+    train_adv_clip_max = 5
+    # the fraction of timesteps to train on. if set to less than 1.0, the model will be trained on a subset of the
+    # timesteps for each sample. this will speed up training but reduce the accuracy of policy gradient estimates.
+    train_timestep_fraction = 1.0
+    # DDPO: the PPO clip range.
+    train_clip_range = 1e-4
+    # when enabled, the model will track the mean and std of reward on a per-prompt basis and use that to compute
+    # advantages. set `config.per_prompt_stat_tracking` to None to disable per-prompt stat tracking, in which case
+    # advantages will be calculated using the mean and std of the entire batch.
+    per_prompt_stat_tracking = True
+    # number of reward values to store in the buffer for each prompt. the buffer persists across epochs.
+    per_prompt_stat_tracking_buffer_size = 16
+    # the minimum number of reward values to store in the buffer before using the per-prompt mean and std. if the buffer
+    # contains fewer than `min_count` values, the mean and std of the entire batch will be used instead.
+    per_prompt_stat_tracking_min_count = 16
+
+    # DPOK: the KL coefficient
+    kl_ratio = 0.01
+
+    ############ Prompt Function ############
+    # prompt function to use. see `prompts.py` for available prompt functisons.
+    prompt_fn = "simple_animals"
+
+    ############ Reward Function ############
+    # reward function to use. see `rewards.py` for available reward functions.
+    # if the reward_fn is "jpeg_compressibility" or "jpeg_incompressibility", using the default config can reproduce our results.
+    # if the reward_fn is "aesthetic_score" and you want to reproduce our results,
+    # set config.num_epochs = 1000, sample.num_batches_per_epoch=1, sample.batch_size=8 and sample.eval_batch_size=8
+    reward_fn = "jpeg_compressibility"
 
 
 class Trainer:
@@ -214,8 +291,6 @@ class Trainer:
             self.first_epoch = 0
 
         self._fix_seed()
-
-    def step(self): ...
 
     def _fix_seed(self):
         assert self.accelerator, "should call after init accelerator"
@@ -561,3 +636,5 @@ class Trainer:
 
             if epoch != 0 and epoch % self.config.save_freq == 0 and self.accelerator.is_main_process:
                 self.accelerator.save_state()
+
+    def step(self): ...
