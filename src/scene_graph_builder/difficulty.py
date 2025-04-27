@@ -126,7 +126,7 @@ class SceneGraphDifficulty:
         constraint_factor = np.std(constraints)
         size_factor = np.log1p(node_count + edge_count)
 
-        difficulty = np.clip(constraint_factor * 9 + size_factor, 0, 10)
+        difficulty = np.clip(constraint_factor*9 + size_factor, 0, 10)
 
         return float(difficulty)
 
