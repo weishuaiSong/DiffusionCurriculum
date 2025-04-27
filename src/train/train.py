@@ -34,15 +34,14 @@ class CurriculumTrainerArguments:
 
 
 class DiffusionCurriculumTrainer:
-    def __init__(self, curriculum_args: CurriculumTrainerArguments, ddpo_args: DDPOConfig) -> None:
+    def __init__(self, curriculum_args: CurriculumTrainerArguments, rl_args: dpok.Config) -> None:
         prompt_loader = CurriculumPromptLoader(prompt_path=curriculum_args.prompt_filename)
         scorer_ = VQAScorer(curriculum_args.vqa_model, prompt_loader.set_difficulty)
-        ddpo_args.project_kwargs = {"automatic_checkpoint_naming": True, "project_dir": os.getcwd()}
         self.curriculum = Curriculum(strategy=curriculum_args.curriculum_strategy)
         self._trainer = dpok.Trainer(
             curriculum=self.curriculum,
             update_target_difficulty=prompt_loader.set_difficulty,
-            config=ddpo_args,
+            config=rl_args,
             reward_function=scorer_.calc_score,
             prompt_function=prompt_loader.next,
         )

@@ -5,7 +5,7 @@ import logging
 import os
 import datetime
 from concurrent import futures
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
@@ -13,7 +13,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
 )
 from diffusers.loaders.utils import AttnProcsLayers
 from diffusers.models.attention_processor import LoRAAttnProcessor
-from diffusers.schedulers import UNet2DConditionModel
+from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 import numpy as np
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from train.curriculum import Curriculum

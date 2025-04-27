@@ -1,15 +1,13 @@
-from train.trainer import CurriculumTrainerArguments, DiffusionCurriculumTrainer
-from trl import DDPOConfig
+from train.trainer import d3po
+from train.train import CurriculumTrainerArguments, DiffusionCurriculumTrainer
 from transformers.hf_argparser import HfArgumentParser
 
 
 def main():
-    parser = HfArgumentParser((CurriculumTrainerArguments, DDPOConfig))  # type: ignore
-    script_args, ddpo_args = parser.parse_args_into_dataclasses()
-    script_args: CurriculumTrainerArguments
-    ddpo_args: DDPOConfig
+    parser = HfArgumentParser((CurriculumTrainerArguments, d3po.Config))  # type: ignore
+    curriculum_args, rl_args = parser.parse_args_into_dataclasses()
 
-    trainer = DiffusionCurriculumTrainer(script_args, ddpo_args)
+    trainer = DiffusionCurriculumTrainer(curriculum_args, rl_args)
     trainer.train()
 
 
