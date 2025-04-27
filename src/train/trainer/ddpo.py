@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Callable, Any, Optional
 import torch
 from train.curriculum import Curriculum
-from trl.models import DDPOStableDiffusionPipeline
 from trl.trainer import DDPOConfig, DDPOTrainer
 
 

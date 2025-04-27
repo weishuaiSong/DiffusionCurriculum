@@ -5,8 +5,6 @@ from train.scorer import VQAScorer
 from train.curriculum import Curriculum
 from typing import Any, Callable, Optional
 from train.trainer import dpok
-from trl.models.modeling_sd_base import DefaultDDPOStableDiffusionPipeline, DDPOStableDiffusionPipeline
-from train.trainer.ddpo import DDPOConfig, DDPOTrainer
 import torch
 
 

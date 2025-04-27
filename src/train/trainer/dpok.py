@@ -62,11 +62,6 @@ class Config:
     # containing checkpoints, in which case the latest one will be used. `use_lora` must be set to the same value
     # as the run that generated the saved checkpoint.
     resume_from = ""
-    # whether or not to use LoRA. LoRA reduces memory usage significantly by injecting small weight matrices into the
-    # attention layers of the UNet. with LoRA, fp16, and a batch size of 1, finetuning Stable Diffusion should take
-    # about 10GB of GPU memory. beware that if LoRA is disabled, training will take a lot of memory and saved checkpoint
-    # files will also be large.
-    use_lora = True
     # whether or not to use xFormers to reduce memory usage.
     use_xformers = False
 
@@ -198,7 +193,7 @@ class Trainer:
         # freeze parameters of models to save more memory
         self.sd_pipeline.vae.requires_grad_(False)
         self.sd_pipeline.text_encoder.requires_grad_(False)
-        self.sd_pipeline.unet.requires_grad_(not self.config.use_lora)
+        self.sd_pipeline.unet.requires_grad_(False)
         # disable safety checker
         self.sd_pipeline.safety_checker = None
         # make the progress bar nicer
@@ -223,32 +218,7 @@ class Trainer:
         # Move unet, vae and text_encoder to device and cast to inference_dtype
         self.sd_pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
         self.sd_pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
-        if self.config.use_lora:
-            self.sd_pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
-
-        if self.config.use_lora:
-            # Set correct lora layers
-            lora_attn_procs = {}
-            for name in self.sd_pipeline.unet.attn_processors.keys():
-                cross_attention_dim = (
-                    None if name.endswith("attn1.processor") else self.sd_pipeline.unet.config.cross_attention_dim
-                )
-                if name.startswith("mid_block"):
-                    hidden_size = self.sd_pipeline.unet.config.block_out_channels[-1]
-                elif name.startswith("up_blocks"):
-                    block_id = int(name[len("up_blocks.")])
-                    hidden_size = list(reversed(self.sd_pipeline.unet.config.block_out_channels))[block_id]
-                elif name.startswith("down_blocks"):
-                    block_id = int(name[len("down_blocks.")])
-                    hidden_size = self.sd_pipeline.unet.config.block_out_channels[block_id]
-
-                lora_attn_procs[name] = LoRAAttnProcessor(
-                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim  # type: ignore
-                )
-            self.sd_pipeline.unet.set_attn_processor(lora_attn_procs)
-            trainable_layers = AttnProcsLayers(self.sd_pipeline.unet.attn_processors)
-        else:
-            trainable_layers = self.sd_pipeline.unet
+        trainable_layers = self.sd_pipeline.unet
 
         self.accelerator.register_save_state_pre_hook(self._save_model_hook)
         self.accelerator.register_load_state_pre_hook(self._load_model_hook)
@@ -279,10 +249,11 @@ class Trainer:
 
         # for some reason, autocast is necessary for non-lora training but for lora training it isn't necessary and it uses
         # more memory
-        self.autocast = contextlib.nullcontext if self.config.use_lora else self.accelerator.autocast
+        self.autocast = self.accelerator.autocast
 
         # Prepare everything with our `accelerator`.
-        trainable_layers, optimizer = self.accelerator.prepare(trainable_layers, optimizer)
+        trainable_layers, optimizer = self.accelerator.prepare(trainable_layers, self.optimizer)
+        self.optimizer = optimizer
 
         # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
         # remote server running llava inference.
@@ -314,7 +285,7 @@ class Trainer:
         np.random.seed(self.config.seed or 114514)
         random_seeds = np.random.randint(0, 100000, size=self.available_devices)
         device_seed = random_seeds[self.accelerator.process_index]  # type: ignore
-        set_seed(device_seed, device_specific=True)
+        set_seed(int(device_seed), device_specific=True)
 
     def _norm_path(self, path: str) -> str:
         res = os.path.normpath(os.path.expanduser(path))
@@ -331,9 +302,7 @@ class Trainer:
 
     def _save_model_hook(self, models, weights, output_dir):
         assert len(models) == 1
-        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
-            self.sd_pipeline.unet.save_attn_procs(output_dir)
-        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
+        if isinstance(models[0], UNet2DConditionModel):
             models[0].save_pretrained(os.path.join(output_dir, "unet"))
         else:
             raise ValueError(f"Unknown model type {type(models[0])}")
@@ -341,15 +310,7 @@ class Trainer:
 
     def _load_model_hook(self, models, input_dir):
         assert len(models) == 1
-        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
-            # pipeline.unet.load_attn_procs(input_dir)
-            tmp_unet = UNet2DConditionModel.from_pretrained(
-                self.config.sd_model, revision=self.config.sd_revision, subfolder="unet"
-            )
-            tmp_unet.load_attn_procs(input_dir)  # type: ignore
-            models[0].load_state_dict(AttnProcsLayers(tmp_unet.attn_processors).state_dict())  # type: ignore
-            del tmp_unet
-        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
+        if isinstance(models[0], UNet2DConditionModel):
             load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
             models[0].register_to_config(**load_model.config)  # type: ignore
             models[0].load_state_dict(load_model.state_dict())  # type: ignore
