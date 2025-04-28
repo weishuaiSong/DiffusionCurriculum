@@ -20,7 +20,7 @@ class AttributeGenerationConfig:
     output_file: str = "attributes.json"
 
 
-class AttributeConceptGenerator:
+class AttributeGenerator:
     SUPPORTED_REASONING_MODELS = ["DeepSeek-R1"]
 
     def __init__(self, config: AttributeGenerationConfig):
@@ -42,12 +42,12 @@ class AttributeConceptGenerator:
             json.dump(data, f, indent=2, ensure_ascii=False)
         Path(temp_file).replace(self.config.output_file)
 
-    async def _generate_concepts(
+    async def _generate_attributes(
             self,
             prompts: List[str],
             validate_func: Optional[Callable[[str], bool]] = None
     ) -> List[Dict[str, Any]]:
-        """Generate attribute concepts from prompts using LLM"""
+        """Generate attributes from prompts using LLM"""
         generator = StreamGenerator(
             model_name=self.config.model_name,
             api_keys=self.config.api_keys,
@@ -62,31 +62,38 @@ class AttributeConceptGenerator:
                 results.append(result)
         return results
 
-    def _validate_concept_response(self, response: str) -> Union[Dict[str, List[str]], bool]:
-        """Validate attribute concept format"""
+    def _validate_attribute_response(self, response: str) -> Union[Dict[str, Dict[str, List[str]]], bool]:
+        """Validate attribute format (concepts with values)"""
         parsed = JSONParser.parse(response)
         if not isinstance(parsed, dict):
             return False
 
-        if "attributes" not in parsed:
+        required_keys = {"object_id", "object_name", "attributes"}
+        if not all(k in parsed for k in required_keys):
             return False
 
-        if not isinstance(parsed["attributes"], list):
+        if not isinstance(parsed["attributes"], dict):
             return False
 
-        for attr in parsed["attributes"]:
-            if not isinstance(attr, str):
+        for concept, values in parsed["attributes"].items():
+            if not isinstance(concept, str):
                 return False
+            if not isinstance(values, list):
+                return False
+            for value in values:
+                if not isinstance(value, str):
+                    return False
         return parsed
 
-    def _create_concept_prompts(
-                self,
-                objects: List[Dict[str, Any]],
-                concepts_per_object: int
-        ) -> List[str]:
-            """Create prompts for generating attribute concepts"""
-            return [
-                f"""Generate a JSON response with exactly {concepts_per_object} attribute concepts for the object '{obj['name']}'. 
+    def _create_attribute_prompts(
+            self,
+            objects: List[Dict[str, Any]],
+            concepts_per_object: int,
+            values_per_concept: int
+    ) -> List[str]:
+        """Create prompts for generating attributes with values"""
+        return [
+            f"""Generate a JSON response with exactly {concepts_per_object} attribute concepts and {values_per_concept} values per concept for the object '{obj['name']}'. 
 
 ### Definition of Attribute Concept:
 An attribute concept is a generalizable characteristic or property that can describe objects, but not a specific instance of that characteristic. For example:
@@ -101,39 +108,54 @@ An attribute concept is a generalizable characteristic or property that can desc
 {{
     "object_id": {obj['id']},
     "object_name": "{obj['name']}",
-    "attributes": ["concept1", "concept2", ...]  # Must be exactly {concepts_per_object} items
+    "attributes": {{
+        "concept1": ["value1", "value2", ...],  # Must be exactly {values_per_concept} items
+        "concept2": ["value1", "value2", ...],
+        ...
+    }}  # Must be exactly {concepts_per_object} concepts
 }}
 
 ### Requirements:
 1. Provide exactly {concepts_per_object} distinct attribute concepts
-2. Each concept must be:
+2. For each concept, provide exactly {values_per_concept} distinct values
+3. Each concept must be:
    - A general characteristic category (not a specific value)
    - Relevant to the object's typical attributes
    - Mutually distinct from other concepts in the list
-3. Concepts should be:
+4. Values should be:
+   - Appropriate for the specific concept
+   - Common, realistic values
+   - Mutually distinct from other values for the same concept
+5. Concepts should be:
    - Single words or short phrases (2-3 words max)
    - In lowercase (unless proper nouns)
    - Concrete and measurable when possible
-4. Return ONLY the valid JSON dictionary with no additional text
+6. Return ONLY the valid JSON dictionary with no additional text
 
 ### Example for the "chair" object:
 {{
     "object_id": 30,
     "object_name": "chair",
-    "attributes": ["material", "leg style", "backrest- type", "armrest presence"]
+    "attributes": {{
+        "material": ["wood", "metal", "plastic", "fabric", "leather"],
+        "leg style": ["straight", "curved", "tapered", "hairpin", "crossed"],
+        "backrest type": ["ladder", "solid", "slatted", "caned", "woven"],
+        "armrest presence": ["with arms", "without arms", "detachable arms", "one arm", "adjustable arms"]
+    }}
 }}
 
 ### Object to analyze: {obj['name']}"""
             for obj in objects
         ]
 
-    async def generate_attribute_concepts(
+    async def generate_attributes(
             self,
             input_data: List[Dict[str, Any]],
-            concepts_per_object: int = 5
+            concepts_per_object: int = 5,
+            values_per_concept: int = 5
     ) -> List[Dict[str, Any]]:
-        """Generate attribute concepts for each object"""
-        logger.info(f"Generating {concepts_per_object} attribute concepts per object")
+        """Generate attributes (concepts with values) for each object"""
+        logger.info(f"Generating {concepts_per_object} attributes with {values_per_concept} values each per object")
 
         # Extract all objects from categories
         objects = []
@@ -146,8 +168,8 @@ An attribute concept is a generalizable characteristic or property that can desc
                     "category_name": category["category_name"]
                 })
 
-        prompts = self._create_concept_prompts(objects, concepts_per_object)
-        results = await self._generate_concepts(prompts, self._validate_concept_response)
+        prompts = self._create_attribute_prompts(objects, concepts_per_object, values_per_concept)
+        results = await self._generate_attributes(prompts, self._validate_attribute_response)
 
         output_data = self._organize_results(input_data, results)
         self._save_data(output_data)
@@ -157,10 +179,10 @@ An attribute concept is a generalizable characteristic or property that can desc
     def _organize_results(
             self,
             input_data: List[Dict[str, Any]],
-            concept_results: List[Dict[str, Any]]
+            attribute_results: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Organize concept results into the original category structure"""
-        concept_map = {res["object_id"]: res["attributes"] for res in concept_results}
+        """Organize attribute results into the original category structure"""
+        attribute_map = {res["object_id"]: res["attributes"] for res in attribute_results}
 
         output_data = []
         for category in input_data:
@@ -177,108 +199,11 @@ An attribute concept is a generalizable characteristic or property that can desc
                     "attributes": {}
                 }
 
-                if obj["id"] in concept_map:
-                    # Initialize empty lists for each attribute concept
-                    for concept in concept_map[obj["id"]]:
-                        obj_entry["attributes"][concept] = []
+                if obj["id"] in attribute_map:
+                    obj_entry["attributes"] = attribute_map[obj["id"]]
 
                 category_entry["objects"].append(obj_entry)
 
             output_data.append(category_entry)
 
         return output_data
-
-
-class AttributeValueGenerator(AttributeConceptGenerator):
-    def _validate_value_response(self, response: str) -> Union[Dict[str, List[str]], bool]:
-        """Validate attribute value format"""
-        parsed = JSONParser.parse(response)
-        if not isinstance(parsed, dict):
-            return False
-
-        required_keys = {"object_id", "object_name", "attribute", "values"}
-        if not all(k in parsed for k in required_keys):
-            return False
-
-        if not isinstance(parsed["values"], list):
-            return False
-
-        for value in parsed["values"]:
-            if not isinstance(value, str):
-                return False
-        return parsed
-
-    def _create_value_prompts(
-            self,
-            objects: List[Dict[str, Any]],
-            values_per_concept: int
-    ) -> List[str]:
-        """Create prompts for generating attribute values"""
-        prompts = []
-        for obj in objects:
-            for attribute in obj["attributes"]:
-                prompts.append(
-                    f"""Generate a JSON response with exactly {values_per_concept} possible values for the attribute '{attribute}' 
-of object '{obj['name']}'. The response should follow this exact structure:
-{{
-    "object_id": {obj['id']},
-    "object_name": "{obj['name']}",
-    "attribute": "{attribute}",
-    "values": ["value1", "value2", ...]
-}}
-
-## Requirements:
-1. Provide exactly {values_per_concept} distinct values
-2. Values should be appropriate for the specific object and attribute
-3. Use common, realistic values
-4. Return ONLY the JSON dictionary
-
-## Object: {obj['name']}
-## Attribute: {attribute}"""
-                )
-        return prompts
-
-    async def generate_attribute_values(
-            self,
-            input_data: List[Dict[str, Any]],
-            values_per_concept: int = 5
-    ) -> List[Dict[str, Any]]:
-        """Generate attribute values for each concept"""
-        logger.info(f"Generating {values_per_concept} values per attribute concept")
-
-        objects = []
-        for category in input_data:
-            for obj in category["objects"]:
-                if obj.get("attributes"):
-                    objects.append({
-                        "id": obj["id"],
-                        "name": obj["name"],
-                        "attributes": list(obj["attributes"].keys())
-                    })
-
-        prompts = self._create_value_prompts(objects, values_per_concept)
-        results = await self._generate_concepts(prompts, self._validate_value_response)
-
-        self._update_with_values(input_data, results)
-        self._save_data(input_data)
-
-        return input_data
-
-    def _update_with_values(
-            self,
-            input_data: List[Dict[str, Any]],
-            value_results: List[Dict[str, Any]]
-    ):
-        """Update the input data structure with generated attribute values"""
-        value_map = {}
-        for res in value_results:
-            key = (res["object_id"], res["attribute"])
-            value_map[key] = res["values"]
-
-        for category in input_data:
-            for obj in category["objects"]:
-                if "attributes" in obj:
-                    for attribute in list(obj["attributes"].keys()):
-                        key = (obj["id"], attribute)
-                        if key in value_map:
-                            obj["attributes"][attribute] = value_map[key]

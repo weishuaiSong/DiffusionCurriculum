@@ -5,7 +5,12 @@ import logging
 from typing import List, Dict, Any
 
 import yaml
-from scene_graph_builder import AttributeConceptGenerator, AttributeValueGenerator, AttributeGenerationConfig
+import sys
+import os
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+sys.path.append(root_dir)
+from src.scene_graph_builder import AttributeGenerator, AttributeGenerationConfig
 from utils import setup_logger
 
 
@@ -49,27 +54,21 @@ def load_config(config_file: str) -> Dict[str, Any]:
 
 
 async def run_generation(config: AttributeGenerationConfig, main_config: Dict[str, Any]):
-    """Run the attribute generation pipeline"""
+    """Run the attribute generation pipeline with unified generator"""
     # Load input data
     input_file = main_config.get("input_file")
     if not input_file:
         raise ValueError("input_file must be specified in config")
     input_data = load_input_data(input_file)
 
-    concept_generator = AttributeConceptGenerator(config)
-    value_generator = AttributeValueGenerator(config)
+    generator = AttributeGenerator(config)
 
-    if main_config.get("run_concept_generation", True):
-        input_data = await concept_generator.generate_attribute_concepts(
-            input_data=input_data,
-            concepts_per_object=main_config.get("concepts_per_object", 5)
-        )
-
-    if main_config.get("run_value_generation", True):
-        input_data = await value_generator.generate_attribute_values(
-            input_data=input_data,
-            values_per_concept=main_config.get("values_per_concept", 5)
-        )
+    # Single-step generation that produces both concepts and values
+    input_data = await generator.generate_attributes(
+        input_data=input_data,
+        concepts_per_object=main_config.get("concepts_per_object", 5),
+        values_per_concept=main_config.get("values_per_concept", 5)
+    )
 
     return input_data
 
