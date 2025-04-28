@@ -7,7 +7,7 @@ from typing import Callable
 
 
 def is_answer_match(ans: str, should: str) -> bool:
-    return ans.lower() in should.lower()
+    return should.lower().strip() in ans.lower()
 
 
 class VQAScorer:
@@ -52,5 +52,5 @@ class VQAScorer:
             for i, resp in enumerate(response):
                 answer = resp[0]["generated_text"][-1]["content"]
                 score += 1 / len(qa) if is_answer_match(answer, qa[i]["answer"]) else 0
-                scores.append(score)
+            scores.append(score)
         return np.array(scores), None  # type: ignore
