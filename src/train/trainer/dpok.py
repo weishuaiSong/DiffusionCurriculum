@@ -334,6 +334,9 @@ class Trainer:
             f"  Number of gradient updates per inner epoch = {self.samples_per_epoch // self.total_train_batch_size}"
         )
         logger.info(f"  Number of inner epochs = {self.config.num_inner_epochs}")
+        global_step = 0
+        for epoch in range(self.first_epoch, self.config.num_epochs):
+            global_step = self.epoch_loop(global_step, epoch)
 
     def _sample(self, epoch: int, global_step: int):
         samples: list[dict] = []
@@ -485,78 +488,75 @@ class Trainer:
 
         return zip_samples, prompts, rewards
 
-    def epoch_loop(self):
-        assert self.accelerator
-        global_step = 0
-        for epoch in range(self.first_epoch, self.config.num_epochs):
-            #################### SAMPLING ####################
-            self.sd_pipeline.unet.eval()
+    def epoch_loop(self, global_step: int, epoch: int):
+        #################### SAMPLING ####################
+        self.sd_pipeline.unet.eval()
 
-            samples, prompts, rewards = self._sample(epoch, global_step)
+        samples, prompts, rewards = self._sample(epoch, global_step)
 
-            # per-prompt mean/std tracking
-            if self.stat_tracker:
-                # gather the prompts across processes
-                prompt_ids = self.accelerator.gather(samples["prompt_ids"]).cpu().numpy()
-                prompts = self.sd_pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
-                advantages = self.stat_tracker.update(prompts, rewards)
-            else:
-                advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+        # per-prompt mean/std tracking
+        if self.stat_tracker:
+            # gather the prompts across processes
+            prompt_ids = self.accelerator.gather(samples["prompt_ids"]).cpu().numpy()
+            prompts = self.sd_pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
+            advantages = self.stat_tracker.update(prompts, rewards)
+        else:
+            advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
-            # ungather advantages; we only need to keep the entries corresponding to the samples on this process
-            samples["advantages"] = (
-                torch.as_tensor(advantages)
-                .reshape(self.accelerator.num_processes, -1)[self.accelerator.process_index]
-                .to(self.accelerator.device)
+        # ungather advantages; we only need to keep the entries corresponding to the samples on this process
+        samples["advantages"] = (
+            torch.as_tensor(advantages)
+            .reshape(self.accelerator.num_processes, -1)[self.accelerator.process_index]
+            .to(self.accelerator.device)
+        )
+
+        del samples["rewards"]
+        del samples["prompt_ids"]
+
+        total_batch_size, num_timesteps = samples["timesteps"].shape
+        assert total_batch_size == self.config.sample_batch_size * self.config.sample_num_batches_per_epoch
+        assert num_timesteps == self.config.sample_num_step
+
+        #################### TRAINING ####################
+        for inner_epoch in range(self.config.num_inner_epochs):
+            # shuffle samples along batch dimension
+            perm = torch.randperm(total_batch_size, device=self.accelerator.device)
+            samples = {k: v[perm] for k, v in samples.items()}
+
+            # shuffle along time dimension independently for each sample
+            perms = torch.stack(
+                [torch.randperm(num_timesteps, device=self.accelerator.device) for _ in range(total_batch_size)]
             )
+            for key in ["timesteps", "latents", "next_latents", "log_probs"]:
+                samples[key] = samples[key][
+                    torch.arange(total_batch_size, device=self.accelerator.device)[:, None], perms
+                ]
 
-            del samples["rewards"]
-            del samples["prompt_ids"]
+            # rebatch for training
+            samples_batched = {k: v.reshape(-1, self.config.train_batch_size, *v.shape[1:]) for k, v in samples.items()}
 
-            total_batch_size, num_timesteps = samples["timesteps"].shape
-            assert total_batch_size == self.config.sample_batch_size * self.config.sample_num_batches_per_epoch
-            assert num_timesteps == self.config.sample_num_step
+            # dict of lists -> list of dicts for easier iteration
+            samples_batched = [dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())]
 
-            #################### TRAINING ####################
-            for inner_epoch in range(self.config.num_inner_epochs):
-                # shuffle samples along batch dimension
-                perm = torch.randperm(total_batch_size, device=self.accelerator.device)
-                samples = {k: v[perm] for k, v in samples.items()}
+            # train
+            self.sd_pipeline.unet.train()
+            info = defaultdict(list)
+            for i, sample in t(
+                list(enumerate(samples_batched)),
+                desc=f"Epoch {epoch}.{inner_epoch}: training",
+                position=0,
+                disable=not self.accelerator.is_local_main_process,
+            ):
+                self.step(sample, i, epoch, inner_epoch, global_step, info)
+                global_step += 1
 
-                # shuffle along time dimension independently for each sample
-                perms = torch.stack(
-                    [torch.randperm(num_timesteps, device=self.accelerator.device) for _ in range(total_batch_size)]
-                )
-                for key in ["timesteps", "latents", "next_latents", "log_probs"]:
-                    samples[key] = samples[key][
-                        torch.arange(total_batch_size, device=self.accelerator.device)[:, None], perms
-                    ]
+            # make sure we did an optimization step at the end of the inner epoch
+            assert self.accelerator.sync_gradients
 
-                # rebatch for training
-                samples_batched = {
-                    k: v.reshape(-1, self.config.train_batch_size, *v.shape[1:]) for k, v in samples.items()
-                }
+        if epoch != 0 and epoch % self.config.save_freq == 0 and self.accelerator.is_main_process:
+            self.accelerator.save_state()
 
-                # dict of lists -> list of dicts for easier iteration
-                samples_batched = [dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())]
-
-                # train
-                self.sd_pipeline.unet.train()
-                info = defaultdict(list)
-                for i, sample in t(
-                    list(enumerate(samples_batched)),
-                    desc=f"Epoch {epoch}.{inner_epoch}: training",
-                    position=0,
-                    disable=not self.accelerator.is_local_main_process,
-                ):
-                    self.step(sample, i, epoch, inner_epoch, global_step, info)
-                    global_step += 1
-
-                # make sure we did an optimization step at the end of the inner epoch
-                assert self.accelerator.sync_gradients
-
-            if epoch != 0 and epoch % self.config.save_freq == 0 and self.accelerator.is_main_process:
-                self.accelerator.save_state()
+        return global_step
 
     def step(self, sample: dict, step: int, epoch: int, inner_epoch: int, global_step: int, info: dict):
         if self.config.train_cfg:

@@ -1,11 +1,8 @@
 from dataclasses import dataclass, field
-import os
 from train.ordered_dataloader import CurriculumPromptLoader
 from train.scorer import VQAScorer
 from train.curriculum import Curriculum
-from typing import Any, Callable, Optional
 from train.trainer import dpok
-import torch
 
 
 @dataclass
