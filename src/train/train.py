@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from train.ordered_dataloader import CurriculumPromptLoader
 from train.scorer import VQAScorer
 from train.curriculum import Curriculum
-from train.trainer import dpok, d3po, ddpo
+from train.trainer import dpok, d3po
 
 
 @dataclass
@@ -15,7 +15,7 @@ class CurriculumTrainerArguments:
         default="random", metadata={"help": "The curriculum strategy to use for training."}
     )
     rl_algorithm: str = field(
-        default="dpok",
+        default="d3po",
         metadata={"help": "The RL algorithm to use for training, supported algorithms: ddpo, d3po, dpok"},
     )
 
@@ -44,13 +44,14 @@ class DiffusionCurriculumTrainer:
                 prompt_function=prompt_loader.next,
             )
         elif curriculum_args.rl_algorithm == "ddpo":
-            self._trainer = ddpo.Trainer(
-                curriculum=self.curriculum,
-                update_target_difficulty=prompt_loader.set_difficulty,
-                config=rl_args,
-                reward_function=scorer_.calc_score,
-                prompt_function=prompt_loader.next,
-            )
+            # self._trainer = ddpo.Trainer(
+            #     curriculum=self.curriculum,
+            #     update_target_difficulty=prompt_loader.set_difficulty,
+            #     config=rl_args,
+            #     reward_function=scorer_.calc_score,
+            #     prompt_function=prompt_loader.next,
+            # )
+            ...
         else:
             raise ValueError(f"不支持的RL算法: {curriculum_args.rl_algorithm}，支持的算法有: ddpo, d3po, dpok")
 

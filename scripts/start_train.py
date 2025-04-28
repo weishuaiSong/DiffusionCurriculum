@@ -1,4 +1,4 @@
-from train.trainer import dpok, d3po, ddpo
+from train.trainer import dpok, d3po
 from train.train import CurriculumTrainerArguments, DiffusionCurriculumTrainer
 from transformers.hf_argparser import HfArgumentParser
 import sys
@@ -18,14 +18,15 @@ def main():
     elif curriculum_args.rl_algorithm == "d3po":
         ConfigClass = d3po.Config
     elif curriculum_args.rl_algorithm == "ddpo":
-        ConfigClass = ddpo.Config
+        # ConfigClass = ddpo.Config
+        ...
     else:
         raise ValueError(f"不支持的RL算法: {curriculum_args.rl_algorithm}，支持的算法有: ddpo, d3po, dpok")
-    
+
     # 解析RL特定参数
     parser = HfArgumentParser(ConfigClass)
     rl_args = parser.parse_args_into_dataclasses()[0]
-    
+
     trainer = DiffusionCurriculumTrainer(curriculum_args, rl_args)
     trainer.train()
 
