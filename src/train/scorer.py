@@ -26,7 +26,7 @@ class VQAScorer:
                 metadata[i]["qa"]["object"] + metadata[i]["qa"]["relation"] + metadata[i]["qa"]["attribute"]
             )
             if isinstance(image, torch.Tensor):
-                image = to_pil(image)
+                image = to_pil(image.to(torch.float))
             score = 0
             all_qa = []
             for each_qa in qa:

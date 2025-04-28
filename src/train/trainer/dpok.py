@@ -1,6 +1,5 @@
 from dataclasses import asdict, dataclass, field
 from collections import defaultdict
-import contextlib
 import logging
 import os
 import datetime
@@ -11,8 +10,6 @@ from accelerate.utils import set_seed, ProjectConfiguration
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
     StableDiffusionPipeline,
 )
-from diffusers.loaders.utils import AttnProcsLayers
-from diffusers.models.attention_processor import LoRAAttnProcessor
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 import numpy as np
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
@@ -74,7 +71,7 @@ class Config:
     # classifier-free guidance weight. 1.0 is no guidance.
     sample_guidance_scale = 5.0
     # batch size (per GPU!) to use for sampling.
-    sample_batch_size = 10
+    sample_batch_size = 1
     # number of batches to sample per epoch. the total number of samples per epoch is `num_batches_per_epoch *
     # batch_size * num_gpus`.
     sample_num_batches_per_epoch = 2
@@ -473,7 +470,7 @@ class Trainer:
         # this is a hack to force wandb to log the images as JPEGs instead of PNGs
         with tempfile.TemporaryDirectory() as tmpdir:
             for i, image in enumerate(images):
-                pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+                pil = Image.fromarray((image.to(torch.float).cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
                 pil = pil.resize((256, 256))
                 pil.save(os.path.join(tmpdir, f"{i}.jpg"))
             self.accelerator.log(
