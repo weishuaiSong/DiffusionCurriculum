@@ -1,279 +1,663 @@
-from dataclasses import dataclass, field, asdict
-from typing import Callable, Any, Optional
-import torch
+from collections import defaultdict
+import contextlib
 import os
 import datetime
 from concurrent import futures
+from dataclasses import asdict, dataclass, field
+
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
 from accelerate.logging import get_logger
-from diffusers.schedulers.scheduling_ddim import DDIMScheduler
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
-    StableDiffusionPipeline,
-)
-from train.curriculum import Curriculum
-from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
-import tqdm
+from diffusers import StableDiffusionPipeline, DDIMScheduler, UNet2DConditionModel
+from diffusers.loaders import AttnProcsLayers
+from diffusers.models.attention_processor import LoRAAttnProcessor
+import numpy as np
+import d3po_pytorch.prompts
+import d3po_pytorch.rewards
+from d3po_pytorch.stat_tracking import PerPromptStatTracker
+from d3po_pytorch.diffusers_patch.pipeline_with_logprob import pipeline_with_logprob
+from d3po_pytorch.diffusers_patch.ddim_with_logprob import ddim_step_with_logprob
+import torch
+import wandb
 from functools import partial
+import tqdm
+import tempfile
+from PIL import Image
 
 t = partial(tqdm.tqdm, dynamic_ncols=True)
+
 logger = get_logger(__name__)
-
-
-class TrainerOld(DDPOTrainer):
-    def __init__(
-        self,
-        curriculum: Curriculum,
-        update_target_difficulty: Callable[[int], None],
-        config: DDPOConfig,
-        reward_function: Callable[[torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
-        prompt_function: Callable[[], tuple[str, Any]],
-        sd_pipeline: DDPOStableDiffusionPipeline,
-        image_samples_hook: Optional[Callable[[Any, Any, Any], Any]] = None,
-    ):
-        super().__init__(config, reward_function, prompt_function, sd_pipeline, image_samples_hook)
-        self.curriculum = curriculum
-        self.update_target_difficulty = update_target_difficulty
-
-    def compute_rewards(self, prompt_image_pairs, is_async: bool = False):
-        rewards = super().compute_rewards(prompt_image_pairs, is_async)
-        metadata = {
-            "prompt_image_pairs": prompt_image_pairs,
-            "rewards": rewards,
-            "current_step": self.num_train_timesteps,
-        }
-        target_difficulty = self.curriculum.infer_target_difficulty(metadata=metadata)
-        self.update_target_difficulty(target_difficulty)
-        return rewards
 
 
 @dataclass
 class Config:
-    # 基本配置
-    sample_num_step: int = field(default=50)
-    train_num_step: int = field(default=1000)
-    timestep_fraction: float = field(default=0.8)
-    log_dir: str = field(default="logs")
-    sd_model: str = field(default="runwayml/stable-diffusion-v1-5")
-    sd_revision: str = field(default="main")
-    learning_rate: float = field(default=1e-4)
-    eval_epoch: int = field(default=2)
+    # 模型配置
+    pretrained_model: str = field(default="runwayml/stable-diffusion-v1-5")
+    pretrained_revision: str = field(default="main")
+    use_lora: bool = field(default=False)
+    use_8bit_adam: bool = field(default=False)
 
-    # 顶层配置
-    run_name: str = ""
-    seed: int = 0
-    logdir: str = "logs"
-    num_epochs: int = 400
-    save_freq: int = 400
-    num_checkpoint_limit: int = 10
-    mixed_precision: str = "fp16"
-    allow_tf32: bool = True
-    resume_from: str = ""
-    use_xformers: bool = False
+    # 随机种子
+    seed: int = field(default=42)
 
-    # 采样相关配置
-    sample_num_steps: int = 20
-    sample_eta: float = 1.0
-    sample_guidance_scale: float = 5.0
-    sample_batch_size: int = 1
-    sample_num_batches_per_epoch: int = 2
-    sample_save_interval: int = 100
+    # 日志和检查点配置
+    logdir: str = field(default="logs")
+    run_name: str = field(default="")
+    num_checkpoint_limit: int = field(default=10)
+    save_freq: int = field(default=10)
 
-    # 训练相关配置
-    train_batch_size: int = 1
-    train_learning_rate: float = 3e-5
-    adam_beta1: float = 0.9
-    adam_beta2: float = 0.999
-    adam_weight_decay: float = 1e-4
-    adam_epsilon: float = 1e-8
-    gradient_accumulation_steps: int = 1
-    train_max_grad_norm: float = 1.0
-    num_inner_epochs: int = 1
-    train_cfg: bool = True
-    train_adv_clip_max: float = 5.0
-    train_timestep_fraction: float = 1.0
-    
-    # DDPO特有参数
-    train_clip_range: float = 1e-4
-    
-    # 统计跟踪相关配置
-    per_prompt_stat_tracking: bool = True
-    per_prompt_stat_tracking_buffer_size: int = 16
-    per_prompt_stat_tracking_min_count: int = 16
-    
-    # 提示词和奖励函数
-    prompt_fn: str = "simple_animals"
-    reward_fn: str = "jpeg_compressibility"
+    # 训练配置
+    num_epochs: int = field(default=100)
+    mixed_precision: str = field(default="fp16")
+    allow_tf32: bool = field(default=True)
+    resume_from: str = field(default="")
+
+    # 采样配置
+    sample_num_steps: int = field(default=50)
+    sample_eta: float = field(default=0.0)
+    sample_guidance_scale: float = field(default=5.0)
+    sample_batch_size: int = field(default=4)
+    sample_num_batches_per_epoch: int = field(default=4)
+    sample_eval_batch_size: int = field(default=4)
+    sample_eval_epoch: int = field(default=5)
+
+    # 训练配置
+    train_batch_size: int = field(default=1)
+    train_learning_rate: float = field(default=1e-5)
+    train_num_inner_epochs: int = field(default=1)
+    train_gradient_accumulation_steps: int = field(default=1)
+    train_max_grad_norm: float = field(default=1.0)
+    train_cfg: bool = field(default=True)
+    train_adv_clip_max: float = field(default=5.0)
+    train_timestep_fraction: float = field(default=1.0)
+    train_clip_range: float = field(default=1e-4)
+
+    # Adam优化器配置
+    adam_beta1: float = field(default=0.9)
+    adam_beta2: float = field(default=0.999)
+    adam_weight_decay: float = field(default=1e-4)
+    adam_epsilon: float = field(default=1e-8)
+
+    # 状态跟踪配置
+    per_prompt_stat_tracking: bool = field(default=True)
+    per_prompt_stat_tracking_buffer_size: int = field(default=16)
+    per_prompt_stat_tracking_min_count: int = field(default=16)
+
+    # 提示和奖励函数
+    prompt_fn: str = field(default="simple_animals")
+    prompt_fn_kwargs: dict = field(default_factory=dict)
+    reward_fn: str = field(default="jpeg_compressibility")
 
 
-class Trainer:
-    def __init__(
-        self,
-        curriculum: Curriculum,
-        update_target_difficulty: Callable[[int], None],
-        config: Config,
-        reward_function: Callable[[torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
-        prompt_function: Callable[[], tuple[str, Any]],
-    ) -> None:
-        self.curriculum = curriculum
-        self.update_target_difficulty = update_target_difficulty
+class DDPOTrainer:
+    def __init__(self, config: Config) -> None:
         self.config = config
+
+        # 设置运行名称
         unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
         if not self.config.run_name:
-            self.run_name = f"ddpo_{unique_id}"
+            self.config.run_name = unique_id
         else:
-            self.run_name = f"{self.config.run_name}_{unique_id}"
-            
+            self.config.run_name += "_" + unique_id
+
         if self.config.resume_from:
-            self.config.resume_from = self._norm_path(self.config.resume_from)
-        
-        # 训练时使用的时间步数
+            self.config.resume_from = os.path.normpath(os.path.expanduser(self.config.resume_from))
+            if "checkpoint_" not in os.path.basename(self.config.resume_from):
+                # 获取此目录中最新的检查点
+                checkpoints = list(filter(lambda x: "checkpoint_" in x, os.listdir(self.config.resume_from)))
+                if len(checkpoints) == 0:
+                    raise ValueError(f"No checkpoints found in {self.config.resume_from}")
+                self.config.resume_from = os.path.join(
+                    self.config.resume_from,
+                    sorted(checkpoints, key=lambda x: int(x.split("_")[-1]))[-1],
+                )
+
+        # 每个轨迹中用于训练的时间步数
         self.num_train_timesteps = int(self.config.sample_num_steps * self.config.train_timestep_fraction)
-        
+
         accelerator_config = ProjectConfiguration(
-            project_dir=os.path.join(self.config.log_dir, self.run_name),
+            project_dir=os.path.join(self.config.logdir, self.config.run_name),
             automatic_checkpoint_naming=True,
             total_limit=self.config.num_checkpoint_limit,
         )
-        
-        # 创建accelerator
+
         self.accelerator = Accelerator(
             log_with="wandb",
             mixed_precision=self.config.mixed_precision,
             project_config=accelerator_config,
-            gradient_accumulation_steps=self.config.gradient_accumulation_steps * self.num_train_timesteps,
+            # 我们总是在时间步之间累积梯度；我们希望config.train.gradient_accumulation_steps是
+            # 我们累积的*样本*数量，所以我们需要乘以训练时间步的数量来得到
+            # 要跨累积的优化器步骤的总数。
+            gradient_accumulation_steps=self.config.train_gradient_accumulation_steps * self.num_train_timesteps,
         )
-        
-        self.available_devices = self.accelerator.num_processes
+
         if self.accelerator.is_main_process:
             self.accelerator.init_trackers(
-                project_name="ddpo-pytorch", config=asdict(self.config), init_kwargs={"wandb": {"name": self.run_name}}
+                project_name="ddpo-pytorch",
+                config=asdict(self.config),
+                init_kwargs={"wandb": {"name": self.config.run_name}},
             )
         logger.info(f"\n{self.config}")
-        
-        # 设置随机种子
-        if self.config.seed is not None:
-            set_seed(self.config.seed)
-        
-        # 加载模型和调度器
-        self.sd_pipeline = StableDiffusionPipeline.from_pretrained(
-            self.config.sd_model, revision=self.config.sd_revision
+
+        # 设置种子（device_specific对于在不同设备上获取不同的提示非常重要）
+        np.random.seed(self.config.seed)
+        self.available_devices = self.accelerator.num_processes
+        random_seeds = np.random.randint(0, 100000, size=self.available_devices)
+        device_seed = random_seeds[self.accelerator.process_index]
+        set_seed(device_seed, device_specific=True)
+
+        # 加载调度器、分词器和模型
+        self.pipeline = StableDiffusionPipeline.from_pretrained(
+            self.config.pretrained_model, revision=self.config.pretrained_revision
         )
-        if self.config.use_xformers:
-            self.sd_pipeline.enable_xformers_memory_efficient_attention()
-            
-        # 冻结不需要训练的模型参数
-        self.sd_pipeline.vae.requires_grad_(False)
-        self.sd_pipeline.text_encoder.requires_grad_(False)
-        self.sd_pipeline.unet.requires_grad_(False)
-        
+        # 冻结模型参数以节省更多内存
+        self.pipeline.vae.requires_grad_(False)
+        self.pipeline.text_encoder.requires_grad_(False)
+        self.pipeline.unet.requires_grad_(not self.config.use_lora)
         # 禁用安全检查器
-        self.sd_pipeline.safety_checker = None
-        
-        # 设置进度条
-        self.sd_pipeline.set_progress_bar_config(
+        self.pipeline.safety_checker = None
+        # 美化进度条
+        self.pipeline.set_progress_bar_config(
             position=1,
             disable=not self.accelerator.is_local_main_process,
             leave=False,
             desc="Timestep",
             dynamic_ncols=True,
         )
-        
-        # 切换到DDIM采样器
-        self.sd_pipeline.scheduler = DDIMScheduler.from_config(self.sd_pipeline.scheduler.config)
-        
-        # 混合精度设置
+        # 切换到DDIM调度器
+        self.pipeline.scheduler = DDIMScheduler.from_config(self.pipeline.scheduler.config)
+
+        # 对于混合精度训练，我们将所有非训练权重（vae、非lora text_encoder和非lora unet）转换为半精度
+        # 因为这些权重仅用于推理，因此无需保持全精度权重。
         inference_dtype = torch.float32
         if self.accelerator.mixed_precision == "fp16":
             inference_dtype = torch.float16
         elif self.accelerator.mixed_precision == "bf16":
             inference_dtype = torch.bfloat16
-            
-        # 将模型移到设备上并设置数据类型
-        self.sd_pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
-        self.sd_pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
-        self.sd_pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
-        
-        trainable_layers = self.sd_pipeline.unet
-        
-        # 设置检查点保存和加载
+
+        # 将unet、vae和text_encoder移至设备并转换为inference_dtype
+        self.pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
+        self.pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
+        if self.config.use_lora:
+            self.pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
+
+        if self.config.use_lora:
+            # 设置正确的lora层
+            lora_attn_procs = {}
+            for name in self.pipeline.unet.attn_processors.keys():
+                cross_attention_dim = (
+                    None if name.endswith("attn1.processor") else self.pipeline.unet.config.cross_attention_dim
+                )
+                if name.startswith("mid_block"):
+                    hidden_size = self.pipeline.unet.config.block_out_channels[-1]
+                elif name.startswith("up_blocks"):
+                    block_id = int(name[len("up_blocks.")])
+                    hidden_size = list(reversed(self.pipeline.unet.config.block_out_channels))[block_id]
+                elif name.startswith("down_blocks"):
+                    block_id = int(name[len("down_blocks.")])
+                    hidden_size = self.pipeline.unet.config.block_out_channels[block_id]
+
+                lora_attn_procs[name] = LoRAAttnProcessor(
+                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim
+                )
+            self.pipeline.unet.set_attn_processor(lora_attn_procs)
+            self.trainable_layers = AttnProcsLayers(self.pipeline.unet.attn_processors)
+        else:
+            self.trainable_layers = self.pipeline.unet
+
+        # 设置使用Accelerate的diffusers友好的检查点保存
         self.accelerator.register_save_state_pre_hook(self._save_model_hook)
         self.accelerator.register_load_state_pre_hook(self._load_model_hook)
-        
-        # 设置TensorFloat32（如果允许）
+
+        # 为Ampere GPU启用TF32以加快训练速度，
+        # 参见 https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
         if self.config.allow_tf32:
             torch.backends.cuda.matmul.allow_tf32 = True
-            
+
         # 初始化优化器
-        self.optimizer = torch.optim.AdamW(
-            trainable_layers.parameters(),
+        if self.config.use_8bit_adam:
+            try:
+                import bitsandbytes as bnb
+            except ImportError:
+                raise ImportError(
+                    "Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`"
+                )
+
+            optimizer_cls = bnb.optim.AdamW8bit
+        else:
+            optimizer_cls = torch.optim.AdamW
+
+        self.optimizer = optimizer_cls(
+            self.trainable_layers.parameters(),
             lr=self.config.train_learning_rate,
             betas=(self.config.adam_beta1, self.config.adam_beta2),
             weight_decay=self.config.adam_weight_decay,
             eps=self.config.adam_epsilon,
         )
-        
-        # 准备提示词函数和奖励函数
-        self.prompt_fn = prompt_function
-        self.reward_fn = reward_function
-        
-        # 生成负面提示词嵌入
-        neg_prompt_embed = self.sd_pipeline.text_encoder(
-            self.sd_pipeline.tokenizer(
+
+        # 准备提示和奖励函数
+        self.prompt_fn = getattr(d3po_pytorch.prompts, self.config.prompt_fn)
+        self.reward_fn = getattr(d3po_pytorch.rewards, self.config.reward_fn)()
+
+        # 生成负面提示嵌入
+        neg_prompt_embed = self.pipeline.text_encoder(
+            self.pipeline.tokenizer(
                 [""],
                 return_tensors="pt",
                 padding="max_length",
                 truncation=True,
-                max_length=self.sd_pipeline.tokenizer.model_max_length,
+                max_length=self.pipeline.tokenizer.model_max_length,
             ).input_ids.to(self.accelerator.device)
         )[0]
         self.sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.sample_batch_size, 1, 1)
-        
-        # 自动混合精度设置
-        self.autocast = self.accelerator.autocast
-        
-        # 使用accelerator准备所有组件
-        trainable_layers, self.optimizer = self.accelerator.prepare(trainable_layers, self.optimizer)
-        
-        # 创建异步执行器
+        self.train_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.train_batch_size, 1, 1)
+
+        # 初始化统计跟踪器
+        self.stat_tracker = None
+        if self.config.per_prompt_stat_tracking:
+            self.stat_tracker = PerPromptStatTracker(
+                self.config.per_prompt_stat_tracking_buffer_size,
+                self.config.per_prompt_stat_tracking_min_count,
+            )
+
+        # 出于某种原因，对于非lora训练autocast是必要的，但对于lora训练它不是必要的，而且会使用更多内存
+        self.autocast = contextlib.nullcontext if self.config.use_lora else self.accelerator.autocast
+
+        # 使用`accelerator`准备所有内容
+        self.trainable_layers, self.optimizer = self.accelerator.prepare(self.trainable_layers, self.optimizer)
+
+        # 执行器异步执行回调。这对于llava回调是有益的，它向运行llava推理的远程服务器发出请求。
         self.executor = futures.ThreadPoolExecutor(max_workers=2)
-        
-    def _norm_path(self, path: str) -> str:
-        if os.path.isabs(path):
-            return path
-        return os.path.join(os.getcwd(), path)
-        
+
+        # 计算每个epoch的样本数和批次大小
+        self.samples_per_epoch = (
+            self.config.sample_batch_size * self.accelerator.num_processes * self.config.sample_num_batches_per_epoch
+        )
+        self.total_train_batch_size = (
+            self.config.train_batch_size
+            * self.accelerator.num_processes
+            * self.config.train_gradient_accumulation_steps
+        )
+
+        # 检查配置的一致性
+        assert self.config.sample_batch_size >= self.config.train_batch_size
+        assert self.config.sample_batch_size % self.config.train_batch_size == 0
+        assert self.samples_per_epoch % self.total_train_batch_size == 0
+
+        # 如果从检查点恢复，设置起始epoch
+        if self.config.resume_from:
+            logger.info(f"Resuming from {self.config.resume_from}")
+            self.accelerator.load_state(self.config.resume_from)
+            self.first_epoch = int(self.config.resume_from.split("_")[-1]) + 1
+        else:
+            self.first_epoch = 0
+
     def _save_model_hook(self, models, weights, output_dir):
-        if self.accelerator.is_main_process:
-            # 实现保存模型的逻辑
-            for i, model in enumerate(models):
-                model.save_pretrained(os.path.join(output_dir, f"model_{i}"))
+        assert len(models) == 1
+        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
+            self.pipeline.unet.save_attn_procs(output_dir)
+        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
+            models[0].save_pretrained(os.path.join(output_dir, "unet"))
+        else:
+            raise ValueError(f"Unknown model type {type(models[0])}")
+        weights.pop()  # 确保accelerate不尝试处理模型的保存
 
     def _load_model_hook(self, models, input_dir):
-        # 实现加载模型的逻辑
-        for i, model in enumerate(models):
-            model.from_pretrained(os.path.join(input_dir, f"model_{i}"))
-            
+        assert len(models) == 1
+        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
+            # pipeline.unet.load_attn_procs(input_dir)
+            tmp_unet = UNet2DConditionModel.from_pretrained(
+                self.config.pretrained_model, revision=self.config.pretrained_revision, subfolder="unet"
+            )
+            tmp_unet.load_attn_procs(input_dir)
+            models[0].load_state_dict(AttnProcsLayers(tmp_unet.attn_processors).state_dict())
+            del tmp_unet
+        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
+            load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
+            models[0].register_to_config(**load_model.config)
+            models[0].load_state_dict(load_model.state_dict())
+            del load_model
+        else:
+            raise ValueError(f"Unknown model type {type(models[0])}")
+        models.pop()  # 确保accelerate不尝试处理模型的加载
+
     def train(self):
-        # 训练入口函数
-        logger.info("Starting DDPO training...")
+        """执行训练过程"""
+        logger.info("***** Running training *****")
+        logger.info(f"  Num Epochs = {self.config.num_epochs}")
+        logger.info(f"  Sample batch size per device = {self.config.sample_batch_size}")
+        logger.info(f"  Train batch size per device = {self.config.train_batch_size}")
+        logger.info(f"  Gradient Accumulation steps = {self.config.train_gradient_accumulation_steps}")
+        logger.info("")
+        logger.info(f"  Total number of samples per epoch = {self.samples_per_epoch}")
+        logger.info(
+            f"  Total train batch size (w. parallel, distributed & accumulation) = {self.total_train_batch_size}"
+        )
+        logger.info(
+            f"  Number of gradient updates per inner epoch = {self.samples_per_epoch // self.total_train_batch_size}"
+        )
+        logger.info(f"  Number of inner epochs = {self.config.train_num_inner_epochs}")
+
         global_step = 0
-        
-        for epoch in range(self.config.num_epochs):
-            logger.info(f"Starting epoch {epoch}")
-            # 这里实现每个epoch的训练逻辑
-            # 通常包括采样、计算奖励、更新模型等步骤
-            
-            # 根据训练结果更新难度
-            target_difficulty = self.curriculum.infer_target_difficulty({})
-            self.update_target_difficulty(target_difficulty)
-            
-            # 这里应该实现完整的训练循环
-            
-            # 保存模型
-            if (epoch + 1) % self.config.save_freq == 0 or epoch == self.config.num_epochs - 1:
-                self.accelerator.save_state()
-                
-            global_step += 1
-            
+        for epoch in range(self.first_epoch, self.config.num_epochs):
+            global_step = self.epoch_loop(epoch, global_step)
+
+    def _sample(self, epoch, global_step):
+        """采样并计算奖励"""
+        samples = []
+        prompts = []
+        for i in tqdm(
+            range(self.config.sample_num_batches_per_epoch),
+            desc=f"Epoch {epoch}: sampling",
+            disable=not self.accelerator.is_local_main_process,
+            position=0,
+        ):
+            # 生成提示
+            prompts, prompt_metadata = zip(
+                *[self.prompt_fn(**self.config.prompt_fn_kwargs) for _ in range(self.config.sample_batch_size)]
+            )
+
+            # 编码提示
+            prompt_ids = self.pipeline.tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding="max_length",
+                truncation=True,
+                max_length=self.pipeline.tokenizer.model_max_length,
+            ).input_ids.to(self.accelerator.device)
+            prompt_embeds = self.pipeline.text_encoder(prompt_ids)[0]
+
+            # 采样
+            with self.autocast():
+                images, _, latents, log_probs = pipeline_with_logprob(
+                    self.pipeline,
+                    prompt_embeds=prompt_embeds,
+                    negative_prompt_embeds=self.sample_neg_prompt_embeds,
+                    num_inference_steps=self.config.sample_num_steps,
+                    guidance_scale=self.config.sample_guidance_scale,
+                    eta=self.config.sample_eta,
+                    output_type="pt",
+                )
+
+            latents = torch.stack(latents, dim=1)  # (batch_size, num_steps + 1, 4, 64, 64)
+            log_probs = torch.stack(log_probs, dim=1)  # (batch_size, num_steps, 1)
+            timesteps = self.pipeline.scheduler.timesteps.repeat(
+                self.config.sample_batch_size, 1
+            )  # (batch_size, num_steps)
+
+            # 异步计算奖励
+            rewards = self.executor.submit(self.reward_fn, images, prompts, prompt_metadata)
+            # yield以确保奖励计算开始
+            eval_rewards = None
+            if epoch % self.config.sample_eval_epoch == 0:
+                eval_prompts, eval_prompt_metadata = zip(
+                    *[self.prompt_fn(**self.config.prompt_fn_kwargs) for _ in range(self.config.sample_eval_batch_size)]
+                )
+
+                # 编码提示
+                eval_prompt_ids = self.pipeline.tokenizer(
+                    eval_prompts,
+                    return_tensors="pt",
+                    padding="max_length",
+                    truncation=True,
+                    max_length=self.pipeline.tokenizer.model_max_length,
+                ).input_ids.to(self.accelerator.device)
+                eval_prompt_embeds = self.pipeline.text_encoder(eval_prompt_ids)[0]
+
+                # 生成与eval_batch大小匹配的负面提示嵌入
+                neg_prompt_embed = self.pipeline.text_encoder(
+                    self.pipeline.tokenizer(
+                        [""],
+                        return_tensors="pt",
+                        padding="max_length",
+                        truncation=True,
+                        max_length=self.pipeline.tokenizer.model_max_length,
+                    ).input_ids.to(self.accelerator.device)
+                )[0]
+                eval_sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.sample_eval_batch_size, 1, 1)
+
+                # 采样
+                with self.autocast():
+                    eval_images, _, _, _ = pipeline_with_logprob(
+                        self.pipeline,
+                        prompt_embeds=eval_prompt_embeds,
+                        negative_prompt_embeds=eval_sample_neg_prompt_embeds,
+                        num_inference_steps=self.config.sample_num_steps,
+                        guidance_scale=self.config.sample_guidance_scale,
+                        eta=self.config.sample_eta,
+                        output_type="pt",
+                    )
+
+                # 异步计算奖励
+                eval_rewards = self.executor.submit(self.reward_fn, eval_images, eval_prompts, eval_prompt_metadata)
+
+            samples.append(
+                {
+                    "prompt_ids": prompt_ids,
+                    "prompt_embeds": prompt_embeds,
+                    "timesteps": timesteps,
+                    "latents": latents[:, :-1],  # 每个条目是时间步t之前的潜在变量
+                    "next_latents": latents[:, 1:],  # 每个条目是时间步t之后的潜在变量
+                    "log_probs": log_probs,
+                    "rewards": rewards,
+                    "eval_rewards": eval_rewards,
+                }
+            )
+
+        # 等待所有奖励计算完成
+        for sample in tqdm(
+            samples,
+            desc="Waiting for rewards",
+            disable=not self.accelerator.is_local_main_process,
+            position=0,
+        ):
+            rewards, reward_metadata = sample["rewards"].result()
+            sample["rewards"] = torch.as_tensor(rewards, device=self.accelerator.device)
+            if sample["eval_rewards"] is not None:
+                eval_rewards, eval_reward_metadata = sample["eval_rewards"].result()
+                sample["eval_rewards"] = torch.as_tensor(
+                    eval_rewards, device=self.accelerator.device
+                )  # 修正为使用eval_rewards
+            else:
+                if "eval_rewards" in sample:
+                    del sample["eval_rewards"]
+
+        # 将样本整合到字典中，其中每个条目的形状为(num_batches_per_epoch * sample.batch_size, ...)
+        zip_samples = {k: torch.cat([s[k] for s in samples], dim=0) for k in samples[0].keys()}
+
+        # 跨进程收集奖励
+        rewards = self.accelerator.gather(zip_samples["rewards"]).cpu().numpy()
+
+        # 记录奖励和图像
+        if "eval_rewards" in zip_samples:
+            eval_rewards = self.accelerator.gather(zip_samples["eval_rewards"]).cpu().numpy()
+            self.accelerator.log(
+                {
+                    "reward": eval_rewards,
+                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
+                    "reward_mean": eval_rewards.mean(),
+                    "reward_std": eval_rewards.std(),
+                },
+                step=global_step,
+            )
+        else:
+            self.accelerator.log(
+                {
+                    "reward": rewards,
+                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
+                    "reward_mean": rewards.mean(),
+                    "reward_std": rewards.std(),
+                },
+                step=global_step,
+            )
+        # 这是一个hack，强制wandb将图像记录为JPEG而不是PNG
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i, image in enumerate(images):
+                pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+                pil = pil.resize((256, 256))
+                pil.save(os.path.join(tmpdir, f"{i}.jpg"))
+            self.accelerator.log(
+                {
+                    "images": [
+                        wandb.Image(os.path.join(tmpdir, f"{i}.jpg"), caption=f"{prompt:.25} | {reward:.2f}")
+                        for i, (prompt, reward) in enumerate(zip(prompts, rewards))
+                    ],
+                },
+                step=global_step,
+            )
+
+        return zip_samples, prompts, rewards
+
+    def epoch_loop(self, epoch, global_step):
+        """执行一个完整的epoch循环，包括采样和训练"""
+        #################### 采样 ####################
+        self.pipeline.unet.eval()
+        samples, prompts, rewards = self._sample(epoch, global_step)
+
+        # 根据提示跟踪每个提示的均值/标准差
+        if self.config.per_prompt_stat_tracking:
+            # 跨进程收集提示
+            prompt_ids = self.accelerator.gather(samples["prompt_ids"]).cpu().numpy()
+            prompts = self.pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
+            advantages = self.stat_tracker.update(prompts, rewards)
+        else:
+            advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+
+        # 解除优势的收集；我们只需要保留与该进程上的样本相对应的条目
+        samples["advantages"] = (
+            torch.as_tensor(advantages)
+            .reshape(self.accelerator.num_processes, -1)[self.accelerator.process_index]
+            .to(self.accelerator.device)
+        )
+
+        del samples["rewards"]
+        del samples["prompt_ids"]
+
+        total_batch_size, num_timesteps = samples["timesteps"].shape
+        assert total_batch_size == self.config.sample_batch_size * self.config.sample_num_batches_per_epoch
+        assert num_timesteps == self.config.sample_num_steps
+
+        #################### 训练 ####################
+        for inner_epoch in range(self.config.train_num_inner_epochs):
+            # 沿批次维度打乱样本
+            perm = torch.randperm(total_batch_size, device=self.accelerator.device)
+            samples = {k: v[perm] for k, v in samples.items()}
+
+            # 对每个样本独立地沿时间维度进行打乱
+            perms = torch.stack(
+                [torch.randperm(num_timesteps, device=self.accelerator.device) for _ in range(total_batch_size)]
+            )
+            for key in ["timesteps", "latents", "next_latents", "log_probs"]:
+                samples[key] = samples[key][
+                    torch.arange(total_batch_size, device=self.accelerator.device)[:, None], perms
+                ]
+
+            # 重新批处理以进行训练
+            samples_batched = {k: v.reshape(-1, self.config.train_batch_size, *v.shape[1:]) for k, v in samples.items()}
+
+            # dict of lists -> list of dicts便于迭代
+            samples_batched = [dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())]
+
+            # 训练
+            self.pipeline.unet.train()
+            info = defaultdict(list)
+            for i, sample in tqdm(
+                list(enumerate(samples_batched)),
+                desc=f"Epoch {epoch}.{inner_epoch}: training",
+                position=0,
+                disable=not self.accelerator.is_local_main_process,
+            ):
+                self.step(sample, i, epoch, inner_epoch, global_step, info)
+                # 这里每个样本后递增global_step
+                global_step += 1
+
+            # 确保我们在内部epoch结束时执行了优化步骤
+            assert self.accelerator.sync_gradients
+
+        if epoch != 0 and epoch % self.config.save_freq == 0 and self.accelerator.is_main_process:
+            self.accelerator.save_state()
+
         return global_step
+
+    def step(self, sample, i, epoch, inner_epoch, global_step, info):
+        """进行单步训练"""
+        if self.config.train_cfg:
+            # 将负面提示连接到样本提示以避免两次前向传递
+            embeds = torch.cat([self.train_neg_prompt_embeds, sample["prompt_embeds"]])
+        else:
+            embeds = sample["prompt_embeds"]
+
+        for j in tqdm(
+            range(self.num_train_timesteps),
+            desc="Timestep",
+            position=1,
+            leave=False,
+            disable=not self.accelerator.is_local_main_process,
+        ):
+            with self.accelerator.accumulate(self.pipeline.unet):
+                with self.autocast():
+                    if self.config.train_cfg:
+                        noise_pred = self.pipeline.unet(
+                            torch.cat([sample["latents"][:, j]] * 2),
+                            torch.cat([sample["timesteps"][:, j]] * 2),
+                            embeds,
+                        ).sample
+                        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                        noise_pred = noise_pred_uncond + self.config.sample_guidance_scale * (
+                            noise_pred_text - noise_pred_uncond
+                        )
+                    else:
+                        noise_pred = self.pipeline.unet(
+                            sample["latents"][:, j], sample["timesteps"][:, j], embeds
+                        ).sample
+                    # 计算给定latents的next_latents的对数概率
+                    _, log_prob = ddim_step_with_logprob(
+                        self.pipeline.scheduler,
+                        noise_pred,
+                        sample["timesteps"][:, j],
+                        sample["latents"][:, j],
+                        eta=self.config.sample_eta,
+                        prev_sample=sample["next_latents"][:, j],
+                    )
+
+                # ppo逻辑
+                advantages = torch.clamp(
+                    sample["advantages"], -self.config.train_adv_clip_max, self.config.train_adv_clip_max
+                )
+                ratio = torch.exp(log_prob - sample["log_probs"][:, j])
+                unclipped_loss = -advantages * ratio
+                clipped_loss = -advantages * torch.clamp(
+                    ratio, 1.0 - self.config.train_clip_range, 1.0 + self.config.train_clip_range
+                )
+                loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+
+                # 调试值
+                # John Schulman说(ratio - 1) - log(ratio)是更好的
+                # 估计器，但大多数现有代码使用这个所以...
+                # http://joschu.net/blog/kl-approx.html
+                info["approx_kl"].append(0.5 * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2))
+                info["clipfrac"].append(torch.mean((torch.abs(ratio - 1.0) > self.config.train_clip_range).float()))
+                info["loss"].append(loss)
+
+                # 反向传播
+                self.accelerator.backward(loss)
+                if self.accelerator.sync_gradients:
+                    self.accelerator.clip_grad_norm_(
+                        self.trainable_layers.parameters(), self.config.train_max_grad_norm
+                    )
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
+            # 检查accelerator是否在后台执行了优化步骤
+            if self.accelerator.sync_gradients:
+                assert (j == self.num_train_timesteps - 1) and (
+                    i + 1
+                ) % self.config.train_gradient_accumulation_steps == 0
+                # 记录与训练相关的内容
+                info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
+                info = self.accelerator.reduce(info, reduction="mean")
+                info.update({"epoch": epoch, "inner_epoch": inner_epoch})
+                self.accelerator.log(info, step=global_step)
+                info = defaultdict(list)
+
+                # 注意：不再在这里增加global_step
