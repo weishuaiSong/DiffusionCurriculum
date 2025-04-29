@@ -1,22 +1,24 @@
 from collections import defaultdict
-import contextlib
 import os
 import datetime
 from concurrent import futures
 from dataclasses import asdict, dataclass, field
+from typing import Any, Callable
 
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
 from accelerate.logging import get_logger
-from diffusers import StableDiffusionPipeline, DDIMScheduler, UNet2DConditionModel
-from diffusers.loaders import AttnProcsLayers
-from diffusers.models.attention_processor import LoRAAttnProcessor
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
+    StableDiffusionPipeline,
+)
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
+
 import numpy as np
-import d3po_pytorch.prompts
-import d3po_pytorch.rewards
-from d3po_pytorch.stat_tracking import PerPromptStatTracker
-from d3po_pytorch.diffusers_patch.pipeline_with_logprob import pipeline_with_logprob
-from d3po_pytorch.diffusers_patch.ddim_with_logprob import ddim_step_with_logprob
+from train.curriculum import Curriculum
+from train.trainer.common.state_tracker import PerPromptStatTracker
+from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
+from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 import torch
 import wandb
 from functools import partial
@@ -34,8 +36,6 @@ class Config:
     # 模型配置
     pretrained_model: str = field(default="runwayml/stable-diffusion-v1-5")
     pretrained_revision: str = field(default="main")
-    use_lora: bool = field(default=False)
-    use_8bit_adam: bool = field(default=False)
 
     # 随机种子
     seed: int = field(default=42)
@@ -90,7 +90,16 @@ class Config:
 
 
 class DDPOTrainer:
-    def __init__(self, config: Config) -> None:
+    def __init__(
+        self,
+        curriculum: Curriculum,
+        update_target_difficulty: Callable[[int], None],
+        config: Config,
+        reward_function: Callable[[torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+        prompt_function: Callable[[], tuple[str, Any]],
+    ) -> None:
+        self.curriculum = curriculum
+        self.update_target_difficulty = update_target_difficulty
         self.config = config
 
         # 设置运行名称
@@ -130,6 +139,7 @@ class DDPOTrainer:
             # 要跨累积的优化器步骤的总数。
             gradient_accumulation_steps=self.config.train_gradient_accumulation_steps * self.num_train_timesteps,
         )
+        self._fix_seed()
 
         if self.accelerator.is_main_process:
             self.accelerator.init_trackers(
@@ -139,13 +149,6 @@ class DDPOTrainer:
             )
         logger.info(f"\n{self.config}")
 
-        # 设置种子（device_specific对于在不同设备上获取不同的提示非常重要）
-        np.random.seed(self.config.seed)
-        self.available_devices = self.accelerator.num_processes
-        random_seeds = np.random.randint(0, 100000, size=self.available_devices)
-        device_seed = random_seeds[self.accelerator.process_index]
-        set_seed(device_seed, device_specific=True)
-
         # 加载调度器、分词器和模型
         self.pipeline = StableDiffusionPipeline.from_pretrained(
             self.config.pretrained_model, revision=self.config.pretrained_revision
@@ -153,7 +156,7 @@ class DDPOTrainer:
         # 冻结模型参数以节省更多内存
         self.pipeline.vae.requires_grad_(False)
         self.pipeline.text_encoder.requires_grad_(False)
-        self.pipeline.unet.requires_grad_(not self.config.use_lora)
+        self.pipeline.unet.requires_grad_(True)
         # 禁用安全检查器
         self.pipeline.safety_checker = None
         # 美化进度条
@@ -178,32 +181,8 @@ class DDPOTrainer:
         # 将unet、vae和text_encoder移至设备并转换为inference_dtype
         self.pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
         self.pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
-        if self.config.use_lora:
-            self.pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
 
-        if self.config.use_lora:
-            # 设置正确的lora层
-            lora_attn_procs = {}
-            for name in self.pipeline.unet.attn_processors.keys():
-                cross_attention_dim = (
-                    None if name.endswith("attn1.processor") else self.pipeline.unet.config.cross_attention_dim
-                )
-                if name.startswith("mid_block"):
-                    hidden_size = self.pipeline.unet.config.block_out_channels[-1]
-                elif name.startswith("up_blocks"):
-                    block_id = int(name[len("up_blocks.")])
-                    hidden_size = list(reversed(self.pipeline.unet.config.block_out_channels))[block_id]
-                elif name.startswith("down_blocks"):
-                    block_id = int(name[len("down_blocks.")])
-                    hidden_size = self.pipeline.unet.config.block_out_channels[block_id]
-
-                lora_attn_procs[name] = LoRAAttnProcessor(
-                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim
-                )
-            self.pipeline.unet.set_attn_processor(lora_attn_procs)
-            self.trainable_layers = AttnProcsLayers(self.pipeline.unet.attn_processors)
-        else:
-            self.trainable_layers = self.pipeline.unet
+        self.trainable_layers = self.pipeline.unet
 
         # 设置使用Accelerate的diffusers友好的检查点保存
         self.accelerator.register_save_state_pre_hook(self._save_model_hook)
@@ -215,17 +194,7 @@ class DDPOTrainer:
             torch.backends.cuda.matmul.allow_tf32 = True
 
         # 初始化优化器
-        if self.config.use_8bit_adam:
-            try:
-                import bitsandbytes as bnb
-            except ImportError:
-                raise ImportError(
-                    "Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`"
-                )
-
-            optimizer_cls = bnb.optim.AdamW8bit
-        else:
-            optimizer_cls = torch.optim.AdamW
+        optimizer_cls = torch.optim.AdamW
 
         self.optimizer = optimizer_cls(
             self.trainable_layers.parameters(),
@@ -236,8 +205,8 @@ class DDPOTrainer:
         )
 
         # 准备提示和奖励函数
-        self.prompt_fn = getattr(d3po_pytorch.prompts, self.config.prompt_fn)
-        self.reward_fn = getattr(d3po_pytorch.rewards, self.config.reward_fn)()
+        self.prompt_fn = prompt_function
+        self.reward_fn = reward_function
 
         # 生成负面提示嵌入
         neg_prompt_embed = self.pipeline.text_encoder(
@@ -261,7 +230,7 @@ class DDPOTrainer:
             )
 
         # 出于某种原因，对于非lora训练autocast是必要的，但对于lora训练它不是必要的，而且会使用更多内存
-        self.autocast = contextlib.nullcontext if self.config.use_lora else self.accelerator.autocast
+        self.autocast = self.accelerator.autocast
 
         # 使用`accelerator`准备所有内容
         self.trainable_layers, self.optimizer = self.accelerator.prepare(self.trainable_layers, self.optimizer)
@@ -294,25 +263,23 @@ class DDPOTrainer:
 
     def _save_model_hook(self, models, weights, output_dir):
         assert len(models) == 1
-        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
-            self.pipeline.unet.save_attn_procs(output_dir)
-        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
+        if isinstance(models[0], UNet2DConditionModel):
             models[0].save_pretrained(os.path.join(output_dir, "unet"))
         else:
             raise ValueError(f"Unknown model type {type(models[0])}")
         weights.pop()  # 确保accelerate不尝试处理模型的保存
 
+    def _fix_seed(self):
+        assert self.accelerator, "should call after init accelerator"
+        # set seed (device_specific is very important to get different prompts on different devices)
+        np.random.seed(self.config.seed or 114514)
+        random_seeds = np.random.randint(0, 100000, size=self.available_devices)
+        device_seed = random_seeds[self.accelerator.process_index]  # type: ignore
+        set_seed(int(device_seed), device_specific=True)
+
     def _load_model_hook(self, models, input_dir):
         assert len(models) == 1
-        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
-            # pipeline.unet.load_attn_procs(input_dir)
-            tmp_unet = UNet2DConditionModel.from_pretrained(
-                self.config.pretrained_model, revision=self.config.pretrained_revision, subfolder="unet"
-            )
-            tmp_unet.load_attn_procs(input_dir)
-            models[0].load_state_dict(AttnProcsLayers(tmp_unet.attn_processors).state_dict())
-            del tmp_unet
-        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
+        if isinstance(models[0], UNet2DConditionModel):
             load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
             models[0].register_to_config(**load_model.config)
             models[0].load_state_dict(load_model.state_dict())
@@ -346,7 +313,7 @@ class DDPOTrainer:
         """采样并计算奖励"""
         samples = []
         prompts = []
-        for i in tqdm(
+        for i in t(
             range(self.config.sample_num_batches_per_epoch),
             desc=f"Epoch {epoch}: sampling",
             disable=not self.accelerator.is_local_main_process,
@@ -445,7 +412,7 @@ class DDPOTrainer:
             )
 
         # 等待所有奖励计算完成
-        for sample in tqdm(
+        for sample in t(
             samples,
             desc="Waiting for rewards",
             disable=not self.accelerator.is_local_main_process,
@@ -561,7 +528,7 @@ class DDPOTrainer:
             # 训练
             self.pipeline.unet.train()
             info = defaultdict(list)
-            for i, sample in tqdm(
+            for i, sample in t(
                 list(enumerate(samples_batched)),
                 desc=f"Epoch {epoch}.{inner_epoch}: training",
                 position=0,
@@ -587,7 +554,7 @@ class DDPOTrainer:
         else:
             embeds = sample["prompt_embeds"]
 
-        for j in tqdm(
+        for j in t(
             range(self.num_train_timesteps),
             desc="Timestep",
             position=1,

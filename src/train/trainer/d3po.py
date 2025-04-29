@@ -142,7 +142,7 @@ class Trainer:
         # 冻结不需要训练的模型参数
         self.sd_pipeline.vae.requires_grad_(False)
         self.sd_pipeline.text_encoder.requires_grad_(False)
-        self.sd_pipeline.unet.requires_grad_(False)
+        self.sd_pipeline.unet.requires_grad_(True)
         if self.config.train_activation_checkpointing:
             self.sd_pipeline.unet.enable_gradient_checkpointing()
 

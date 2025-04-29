@@ -174,6 +174,8 @@ class Trainer:
             # the total number of optimizer steps to accumulate across.
             gradient_accumulation_steps=self.config.gradient_accumulation_steps * self.num_train_timesteps,
         )
+
+        self._fix_seed()
         self.available_devices = self.accelerator.num_processes
         if self.accelerator.is_main_process:
             self.accelerator.init_trackers(
@@ -190,7 +192,7 @@ class Trainer:
         # freeze parameters of models to save more memory
         self.sd_pipeline.vae.requires_grad_(False)
         self.sd_pipeline.text_encoder.requires_grad_(False)
-        self.sd_pipeline.unet.requires_grad_(False)
+        self.sd_pipeline.unet.requires_grad_(True)
         # disable safety checker
         self.sd_pipeline.safety_checker = None
         # make the progress bar nicer
@@ -273,8 +275,6 @@ class Trainer:
             self.first_epoch = int(self.config.resume_from.split("_")[-1]) + 1
         else:
             self.first_epoch = 0
-
-        self._fix_seed()
 
     def _fix_seed(self):
         assert self.accelerator, "should call after init accelerator"
