@@ -175,8 +175,8 @@ class Trainer:
             gradient_accumulation_steps=self.config.gradient_accumulation_steps * self.num_train_timesteps,
         )
 
-        self._fix_seed()
         self.available_devices = self.accelerator.num_processes
+        self._fix_seed()
         if self.accelerator.is_main_process:
             self.accelerator.init_trackers(
                 project_name="ddpo-pytorch",

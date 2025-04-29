@@ -89,7 +89,7 @@ class Config:
     reward_fn: str = field(default="jpeg_compressibility")
 
 
-class DDPOTrainer:
+class Trainer:
     def __init__(
         self,
         curriculum: Curriculum,
@@ -139,6 +139,7 @@ class DDPOTrainer:
             # 要跨累积的优化器步骤的总数。
             gradient_accumulation_steps=self.config.train_gradient_accumulation_steps * self.num_train_timesteps,
         )
+        self.available_devices = self.accelerator.num_processes
         self._fix_seed()
 
         if self.accelerator.is_main_process:
