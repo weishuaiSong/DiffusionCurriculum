@@ -119,7 +119,7 @@ class SceneGraphSampler:
         G = nx.Graph()
 
         # Start with some objects
-        n_objects = max(2, int((d_min + d_max) / 4))
+        n_objects = max(5, int((d_min + d_max) / 4))
         for i in range(n_objects):
             G.add_node(i, type="object")
 
@@ -190,7 +190,7 @@ class SceneGraphSampler:
                 G = nx.Graph()
 
                 # Add objects first
-                n_objects = max(2, int((d_min + d_max) / 4))
+                n_objects = max(5, int((d_min + d_max) / 4))
                 for i in range(n_objects):
                     G.add_node(i, type="object")
 
@@ -255,12 +255,7 @@ def test_sampler():
     difficulty_calc = SceneGraphDifficulty()
     sampler = SceneGraphSampler(difficulty_calc)
 
-    test_cases = [
-        ("Easy", 2.0, 4.0),
-        # ("Medium", 4.0, 6.0),
-        # ("Hard", 6.0, 8.0),
-        # ("Extreme", 8.0, 10.0)
-    ]
+    test_cases = [("Easy", 2.0, 4.0), ("Medium", 4.0, 6.0), ("Hard", 6.0, 8.0), ("Extreme", 8.0, 10.0)]
 
     diversity_stats = {}
     validation_failures = 0  # 新增验证失败计数器
@@ -272,7 +267,7 @@ def test_sampler():
 
         for i in range(1000):
             print(f"\nSample {i + 1}:")
-            G = sampler.sample(d_min, d_max, verbose=True)
+            G = sampler.sample(d_min, d_max, verbose=True, max_iter=200)
 
             if G:
                 # 新增详细验证
@@ -324,4 +319,3 @@ def test_sampler():
 
 if __name__ == "__main__":
     test_sampler()
-
