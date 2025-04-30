@@ -2,6 +2,7 @@ import numpy as np
 import networkx as nx
 from tqdm import tqdm
 from scene_graph_builder.difficulty import SceneGraphDifficulty
+from concurrent.futures import Future, ProcessPoolExecutor
 
 
 class SceneGraphSampler:
@@ -259,16 +260,21 @@ def test_sampler():
 
     diversity_stats = {}
     validation_failures = 0  # 新增验证失败计数器
+    executor = ProcessPoolExecutor()
 
     for name, d_min, d_max in test_cases:
         print(f"\n=== Testing {name} range [{d_min}, {d_max}] ===")
+        future_samples: list[Future[nx.Graph | None]] = []
         samples = []
         difficulties = []
 
         for i in range(1000):
             print(f"\nSample {i + 1}:")
-            G = sampler.sample(d_min, d_max, verbose=True, max_iter=200)
+            future_g = executor.submit(sampler.sample, d_min, d_max, verbose=True, max_iter=200)
+            future_samples.append(future_g)
 
+        for i, future_g in enumerate(future_samples):
+            G = future_g.result()
             if G:
                 # 新增详细验证
                 validation_errors = validate_graph(G)
