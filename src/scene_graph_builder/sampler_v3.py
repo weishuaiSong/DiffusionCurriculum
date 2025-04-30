@@ -1,10 +1,8 @@
 import numpy as np
 import networkx as nx
-from typing import Optional, List, Tuple
-import random
-from scipy.special import expit as sigmoid
 from tqdm import tqdm
-from difficulty import SceneGraphDifficulty
+from scene_graph_builder.difficulty import SceneGraphDifficulty
+
 
 class SceneGraphSampler:
     """MCMC sampler for scene graphs with node type constraints."""
@@ -12,7 +10,7 @@ class SceneGraphSampler:
     def __init__(self, difficulty_calculator: SceneGraphDifficulty):
         self.difficulty = difficulty_calculator
         # Remove edge operations as requested
-        self.operations = ['add_node', 'remove_node']
+        self.operations = ["add_node", "remove_node"]
 
     def is_valid(self, G: nx.Graph, d_min: float, d_max: float) -> bool:
         """Check difficulty and structural constraints."""
@@ -26,23 +24,23 @@ class SceneGraphSampler:
 
         # Type constraints check
         for node in G.nodes:
-            node_type = G.nodes[node].get('type')
-            if node_type not in ['object', 'attribute', 'relation']:
+            node_type = G.nodes[node].get("type")
+            if node_type not in ["object", "attribute", "relation"]:
                 return False
 
             neighbors = list(G.neighbors(node))
-            if node_type == 'attribute':
+            if node_type == "attribute":
                 # Attribute must connect to exactly one object
-                if len(neighbors) != 1 or G.nodes[neighbors[0]]['type'] != 'object':
+                if len(neighbors) != 1 or G.nodes[neighbors[0]]["type"] != "object":
                     return False
-            elif node_type == 'relation':
+            elif node_type == "relation":
                 # Relation must connect to exactly two objects
-                if len(neighbors) != 2 or any(G.nodes[n]['type'] != 'object' for n in neighbors):
+                if len(neighbors) != 2 or any(G.nodes[n]["type"] != "object" for n in neighbors):
                     return False
-            elif node_type == 'object':
+            elif node_type == "object":
                 # Object can't connect to other objects
                 for neighbor in neighbors:
-                    if G.nodes[neighbor]['type'] == 'object':
+                    if G.nodes[neighbor]["type"] == "object":
                         return False
 
         return True
@@ -52,49 +50,48 @@ class SceneGraphSampler:
         G_new = G.copy()
 
         # Only consider valid operations based on graph state
-        valid_ops = ['add_node']
+        valid_ops = ["add_node"]
         if len(G_new) > 1:
-            valid_ops.append('remove_node')
+            valid_ops.append("remove_node")
 
         move = np.random.choice(valid_ops)
 
         try:
-            if move == 'add_node':
-                existing_objects = [n for n, data in G_new.nodes(data=True)
-                                    if data['type'] == 'object']
+            if move == "add_node":
+                existing_objects = [n for n, data in G_new.nodes(data=True) if data["type"] == "object"]
 
                 # Determine possible types
-                possible_types = ['object']
+                possible_types = ["object"]
                 if existing_objects:
-                    possible_types.append('attribute')
+                    possible_types.append("attribute")
                 if len(existing_objects) >= 2:
-                    possible_types.append('relation')
+                    possible_types.append("relation")
 
                 node_type = np.random.choice(possible_types)
                 new_node = max(G_new.nodes) + 1 if G_new.nodes else 0
                 G_new.add_node(new_node, type=node_type)
 
                 # Add edges based on node type
-                if node_type == 'attribute':
+                if node_type == "attribute":
                     # Connect to one random object
                     target = np.random.choice(existing_objects)
                     G_new.add_edge(new_node, target)
 
-                elif node_type == 'relation':
+                elif node_type == "relation":
                     # Connect to two random objects
                     targets = np.random.choice(existing_objects, 2, replace=False)
                     G_new.add_edge(new_node, targets[0])
                     G_new.add_edge(new_node, targets[1])
 
-            elif move == 'remove_node':
+            elif move == "remove_node":
                 # Find nodes that can be safely removed
                 removable_nodes = []
                 for node in G_new.nodes:
-                    node_type = G_new.nodes[node]['type']
-                    if node_type == 'object':
+                    node_type = G_new.nodes[node]["type"]
+                    if node_type == "object":
                         # Check if this object has dependent attributes or relations
                         has_dependent = any(
-                            G_new.nodes[neighbor]['type'] in ['attribute', 'relation']
+                            G_new.nodes[neighbor]["type"] in ["attribute", "relation"]
                             for neighbor in G_new.neighbors(node)
                         )
                         if not has_dependent:
@@ -114,8 +111,9 @@ class SceneGraphSampler:
 
         return G_new
 
-    def sample(self, d_min: float, d_max: float, max_iter: int = 10000,
-               tolerance: int = 500, verbose: bool = True) -> Optional[nx.Graph]:
+    def sample(
+        self, d_min: float, d_max: float, max_iter: int = 10000, tolerance: int = 500, verbose: bool = True
+    ) -> Optional[nx.Graph]:
         """Modified sampling with type-aware initialization."""
         # Initialize with a mix of node types
         G = nx.Graph()
@@ -123,13 +121,13 @@ class SceneGraphSampler:
         # Start with some objects
         n_objects = max(2, int((d_min + d_max) / 4))
         for i in range(n_objects):
-            G.add_node(i, type='object')
+            G.add_node(i, type="object")
 
         # Add some attributes
         n_attrs = np.random.randint(0, n_objects + 1)
         node_id = n_objects
         for _ in range(n_attrs):
-            G.add_node(node_id, type='attribute')
+            G.add_node(node_id, type="attribute")
             # Connect to a random object
             obj = np.random.randint(0, n_objects)
             G.add_edge(node_id, obj)
@@ -139,14 +137,14 @@ class SceneGraphSampler:
         if n_objects >= 2:  # Need at least 2 objects for relations
             n_rels = np.random.randint(0, max(1, n_objects // 2))
             for _ in range(n_rels):
-                G.add_node(node_id, type='relation')
+                G.add_node(node_id, type="relation")
                 # Connect to two random objects
                 targets = np.random.choice(range(n_objects), 2, replace=False)
                 G.add_edge(node_id, targets[0])
                 G.add_edge(node_id, targets[1])
                 node_id += 1
 
-        best_G, best_delta = None, float('inf')
+        best_G, best_delta = None, float("inf")
         unchanged = 0
         progress = tqdm(range(max_iter), desc="Sampling") if verbose else range(max_iter)
 
@@ -161,8 +159,10 @@ class SceneGraphSampler:
 
             # Distance to target range - standard metric for MCMC
             def distance_to_range(d):
-                if d < d_min: return d_min - d
-                if d > d_max: return d - d_max
+                if d < d_min:
+                    return d_min - d
+                if d > d_max:
+                    return d - d_max
                 return 0
 
             current_delta = distance_to_range(current_diff)
@@ -192,13 +192,13 @@ class SceneGraphSampler:
                 # Add objects first
                 n_objects = max(2, int((d_min + d_max) / 4))
                 for i in range(n_objects):
-                    G.add_node(i, type='object')
+                    G.add_node(i, type="object")
 
                 # Add attributes with connections
                 n_attrs = np.random.randint(0, n_objects + 1)
                 node_id = n_objects
                 for _ in range(n_attrs):
-                    G.add_node(node_id, type='attribute')
+                    G.add_node(node_id, type="attribute")
                     # Connect to a random object
                     obj = np.random.randint(0, n_objects)
                     G.add_edge(node_id, obj)
@@ -208,7 +208,7 @@ class SceneGraphSampler:
                 if n_objects >= 2:
                     n_rels = np.random.randint(0, max(1, n_objects // 2))
                     for _ in range(n_rels):
-                        G.add_node(node_id, type='relation')
+                        G.add_node(node_id, type="relation")
                         # Connect to two random objects
                         targets = np.random.choice(range(n_objects), 2, replace=False)
                         G.add_edge(node_id, targets[0])
@@ -233,21 +233,21 @@ def test_sampler():
 
         # 类型检查
         for node in G.nodes:
-            node_type = G.nodes[node].get('type')
-            if node_type not in ['object', 'attribute', 'relation']:
+            node_type = G.nodes[node].get("type")
+            if node_type not in ["object", "attribute", "relation"]:
                 errors.append(f"Node {node} has invalid type: {node_type}")
 
         # 连接约束检查
         for node in G.nodes:
-            node_type = G.nodes[node].get('type')
+            node_type = G.nodes[node].get("type")
             neighbors = list(G.neighbors(node))
 
-            if node_type == 'attribute':
-                if len(neighbors) != 1 or G.nodes[neighbors[0]]['type'] != 'object':
+            if node_type == "attribute":
+                if len(neighbors) != 1 or G.nodes[neighbors[0]]["type"] != "object":
                     errors.append(f"Attribute node {node} invalid connections")
 
-            elif node_type == 'relation':
-                if len(neighbors) != 2 or any(G.nodes[n]['type'] != 'object' for n in neighbors):
+            elif node_type == "relation":
+                if len(neighbors) != 2 or any(G.nodes[n]["type"] != "object" for n in neighbors):
                     errors.append(f"Relation node {node} invalid connections")
 
         return errors
@@ -289,13 +289,9 @@ def test_sampler():
                 difficulties.append(d)
 
                 # 打印节点类型分布
-                type_counts = {
-                    'object': 0,
-                    'attribute': 0,
-                    'relation': 0
-                }
+                type_counts = {"object": 0, "attribute": 0, "relation": 0}
                 for n in G.nodes:
-                    type_counts[G.nodes[n]['type']] += 1
+                    type_counts[G.nodes[n]["type"]] += 1
                 print("Node types:", type_counts)
 
                 # 原有输出保持
@@ -309,11 +305,11 @@ def test_sampler():
         # 收集统计数据时排除验证失败的样本
         if samples:
             diversity_stats[name] = {
-                'difficulty_range': (min(difficulties), max(difficulties)),
-                'node_range': (min(len(G.nodes) for G in samples), max(len(G.nodes) for G in samples)),
-                'edge_range': (min(len(G.edges) for G in samples), max(len(G.edges) for G in samples)),
-                'unique_structures': len({tuple(edge_canonical_form(G)) for G in samples}),
-                'validation_failures': validation_failures  # 新增验证失败统计
+                "difficulty_range": (min(difficulties), max(difficulties)),
+                "node_range": (min(len(G.nodes) for G in samples), max(len(G.nodes) for G in samples)),
+                "edge_range": (min(len(G.edges) for G in samples), max(len(G.edges) for G in samples)),
+                "unique_structures": len({tuple(edge_canonical_form(G)) for G in samples}),
+                "validation_failures": validation_failures,  # 新增验证失败统计
             }
 
     print("\n=== Diversity Analysis ===")
@@ -328,3 +324,4 @@ def test_sampler():
 
 if __name__ == "__main__":
     test_sampler()
+
