@@ -113,7 +113,7 @@ class SceneGraphSampler:
 
     def sample(
         self, d_min: float, d_max: float, max_iter: int = 10000, tolerance: int = 500, verbose: bool = True
-    ) -> Optional[nx.Graph]:
+    ) -> nx.Graph | None:
         """Modified sampling with type-aware initialization."""
         # Initialize with a mix of node types
         G = nx.Graph()
@@ -256,10 +256,10 @@ def test_sampler():
     sampler = SceneGraphSampler(difficulty_calc)
 
     test_cases = [
-        # ("Easy", 2.0, 4.0),
+        ("Easy", 2.0, 4.0),
         # ("Medium", 4.0, 6.0),
         # ("Hard", 6.0, 8.0),
-        ("Extreme", 8.0, 10.0)
+        # ("Extreme", 8.0, 10.0)
     ]
 
     diversity_stats = {}

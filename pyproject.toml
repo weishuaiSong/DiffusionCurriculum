@@ -10,6 +10,7 @@ dependencies = [
     "openai>=0.28.0",
     "peft>=0.15.2",
     "PyYAML>=6.0",
+    "scipy>=1.15.2",
     "sentencepiece>=0.2.0",
     "torchvision>=0.21.0",
     "transformers==4.48.3",
