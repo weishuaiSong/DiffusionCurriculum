@@ -357,7 +357,7 @@ class Trainer:
             eval_rewards = None
             if epoch % self.config.sample_eval_epoch == 0:
                 eval_prompts, eval_prompt_metadata = zip(
-                    *[self.prompt_fn(**self.config.prompt_fn_kwargs) for _ in range(self.config.sample_eval_batch_size)]
+                    *[self.prompt_fn() for _ in range(self.config.sample_eval_batch_size)]
                 )
 
                 # 编码提示
