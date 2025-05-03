@@ -1,7 +1,6 @@
 from collections import defaultdict
 import os
 import datetime
-from concurrent import futures
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
 
@@ -236,9 +235,6 @@ class Trainer:
         # 使用`accelerator`准备所有内容
         self.trainable_layers, self.optimizer = self.accelerator.prepare(self.trainable_layers, self.optimizer)
 
-        # 执行器异步执行回调。这对于llava回调是有益的，它向运行llava推理的远程服务器发出请求。
-        self.executor = futures.ThreadPoolExecutor(max_workers=2)
-
         # 计算每个epoch的样本数和批次大小
         self.samples_per_epoch = (
             self.config.sample_batch_size * self.accelerator.num_processes * self.config.sample_num_batches_per_epoch
@@ -351,10 +347,13 @@ class Trainer:
                 self.config.sample_batch_size, 1
             )  # (batch_size, num_steps)
 
-            # 异步计算奖励
-            rewards = self.executor.submit(self.reward_fn, images, prompts, prompt_metadata)
-            # yield以确保奖励计算开始
+            # 直接计算奖励，不使用executor
+            rewards, reward_metadata = self.reward_fn(images, prompts, prompt_metadata)
+            rewards = torch.as_tensor(rewards, device=self.accelerator.device)
+
+            # eval奖励计算
             eval_rewards = None
+            eval_reward_metadata = None
             if epoch % self.config.sample_eval_epoch == 0:
                 eval_prompts, eval_prompt_metadata = zip(
                     *[self.prompt_fn() for _ in range(self.config.sample_eval_batch_size)]
@@ -394,8 +393,11 @@ class Trainer:
                         output_type="pt",
                     )
 
-                # 异步计算奖励
-                eval_rewards = self.executor.submit(self.reward_fn, eval_images, eval_prompts, eval_prompt_metadata)
+                # 直接计算eval奖励
+                eval_rewards_result, eval_reward_metadata = self.reward_fn(
+                    eval_images, eval_prompts, eval_prompt_metadata
+                )
+                eval_rewards = torch.as_tensor(eval_rewards_result, device=self.accelerator.device)
 
             samples.append(
                 {
@@ -409,24 +411,6 @@ class Trainer:
                     "eval_rewards": eval_rewards,
                 }
             )
-
-        # 等待所有奖励计算完成
-        for sample in t(
-            samples,
-            desc="Waiting for rewards",
-            disable=not self.accelerator.is_local_main_process,
-            position=0,
-        ):
-            rewards, reward_metadata = sample["rewards"].result()
-            sample["rewards"] = torch.as_tensor(rewards, device=self.accelerator.device)
-            if sample["eval_rewards"] is not None:
-                eval_rewards, eval_reward_metadata = sample["eval_rewards"].result()
-                sample["eval_rewards"] = torch.as_tensor(
-                    eval_rewards, device=self.accelerator.device
-                )  # 修正为使用eval_rewards
-            else:
-                if "eval_rewards" in sample:
-                    del sample["eval_rewards"]
 
         # 将样本整合到字典中，其中每个条目的形状为(num_batches_per_epoch * sample.batch_size, ...)
         zip_samples = {k: torch.cat([s[k] for s in samples], dim=0) for k in samples[0].keys()}
