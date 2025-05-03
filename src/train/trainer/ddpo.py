@@ -321,9 +321,7 @@ class Trainer:
             position=0,
         ):
             # 生成提示
-            prompts, prompt_metadata = zip(
-                *[self.prompt_fn(**self.config.prompt_fn_kwargs) for _ in range(self.config.sample_batch_size)]
-            )
+            prompts, prompt_metadata = zip(*[self.prompt_fn() for _ in range(self.config.sample_batch_size)])
 
             # 编码提示
             prompt_ids = self.pipeline.tokenizer(
