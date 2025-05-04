@@ -2,7 +2,7 @@ from collections import defaultdict
 import os
 import datetime
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
@@ -19,6 +19,7 @@ from train.trainer.common.state_tracker import PerPromptStatTracker
 from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 import torch
+from torch.utils.data import Dataset, DataLoader
 from transformers import Pipeline
 from transformers.pipelines import pipeline
 import wandb
@@ -30,6 +31,40 @@ from PIL import Image
 t = partial(tqdm.tqdm, dynamic_ncols=True)
 
 logger = get_logger(__name__)
+
+
+class DDPODataset(Dataset):
+    def __init__(
+        self,
+        samples: Dict[str, torch.Tensor],
+        train_batch_size: int,
+    ):
+        """
+        DDPO数据集类
+
+        Args:
+            samples: 采样得到的数据字典
+            train_batch_size: 训练批次大小
+        """
+        self.samples = samples
+        self.train_batch_size = train_batch_size
+        self.total_samples = next(iter(samples.values())).shape[0]
+
+        # 沿批次维度打乱样本
+        perm = torch.randperm(self.total_samples)
+        self.samples = {k: v[perm] for k, v in samples.items()}
+
+        # 对每个样本独立地沿时间维度进行打乱
+        total_batch_size, num_timesteps = self.samples["timesteps"].shape
+        self.perms = torch.stack([torch.randperm(num_timesteps) for _ in range(total_batch_size)])
+        for key in ["timesteps", "latents", "next_latents", "log_probs"]:
+            self.samples[key] = self.samples[key][torch.arange(total_batch_size)[:, None], self.perms]
+
+    def __len__(self):
+        return self.total_samples
+
+    def __getitem__(self, idx):
+        return {k: v[idx] for k, v in self.samples.items()}
 
 
 @dataclass
@@ -88,6 +123,10 @@ class Config:
     prompt_fn: str = field(default="simple_animals")
     prompt_fn_kwargs: dict = field(default_factory=dict)
     reward_fn: str = field(default="jpeg_compressibility")
+
+    # 数据加载配置
+    num_workers: int = field(default=4)
+    dataloader_pin_memory: bool = field(default=True)
 
 
 class Trainer:
@@ -192,6 +231,11 @@ class Trainer:
             device_map="auto",
             batch_size=config.train_batch_size,
         )
+
+        self.vqa_pipeline.model.eval()
+        for p in self.vqa_pipeline.model.parameters():
+            p.requires_grad = False
+
         self.vqa_pipeline.model = self.accelerator.prepare(self.vqa_pipeline.model)
 
         self.trainable_layers = self.pipeline.unet
@@ -501,35 +545,32 @@ class Trainer:
 
         #################### 训练 ####################
         for inner_epoch in range(self.config.train_num_inner_epochs):
-            # 沿批次维度打乱样本
-            perm = torch.randperm(total_batch_size, device=self.accelerator.device)
-            samples = {k: v[perm] for k, v in samples.items()}
+            # 创建数据集
+            dataset = DDPODataset(samples, self.config.train_batch_size)
 
-            # 对每个样本独立地沿时间维度进行打乱
-            perms = torch.stack(
-                [torch.randperm(num_timesteps, device=self.accelerator.device) for _ in range(total_batch_size)]
+            # 创建DataLoader
+            dataloader = DataLoader(
+                dataset,
+                batch_size=self.config.train_batch_size,
+                shuffle=True,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.dataloader_pin_memory,
             )
-            for key in ["timesteps", "latents", "next_latents", "log_probs"]:
-                samples[key] = samples[key][
-                    torch.arange(total_batch_size, device=self.accelerator.device)[:, None], perms
-                ]
 
-            # 重新批处理以进行训练
-            samples_batched = {k: v.reshape(-1, self.config.train_batch_size, *v.shape[1:]) for k, v in samples.items()}
-
-            # dict of lists -> list of dicts便于迭代
-            samples_batched = [dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())]
+            # 使用accelerate准备DataLoader
+            dataloader = self.accelerator.prepare(dataloader)
 
             # 训练
             self.pipeline.unet.train()
             info = defaultdict(list)
-            for i, sample in t(
-                list(enumerate(samples_batched)),
+
+            for i, batch in t(
+                enumerate(dataloader),
                 desc=f"Epoch {epoch}.{inner_epoch}: training",
                 position=0,
                 disable=not self.accelerator.is_local_main_process,
             ):
-                self.step(sample, i, epoch, inner_epoch, global_step, info)
+                self.step(batch, i, epoch, inner_epoch, global_step, info)
                 # 这里每个样本后递增global_step
                 global_step += 1
 
@@ -541,13 +582,13 @@ class Trainer:
 
         return global_step
 
-    def step(self, sample, i, epoch, inner_epoch, global_step, info):
+    def step(self, batch, i, epoch, inner_epoch, global_step, info):
         """进行单步训练"""
         if self.config.train_cfg:
             # 将负面提示连接到样本提示以避免两次前向传递
-            embeds = torch.cat([self.train_neg_prompt_embeds, sample["prompt_embeds"]])
+            embeds = torch.cat([self.train_neg_prompt_embeds, batch["prompt_embeds"]])
         else:
-            embeds = sample["prompt_embeds"]
+            embeds = batch["prompt_embeds"]
 
         for j in t(
             range(self.num_train_timesteps),
@@ -560,8 +601,8 @@ class Trainer:
                 with self.autocast():
                     if self.config.train_cfg:
                         noise_pred = self.pipeline.unet(
-                            torch.cat([sample["latents"][:, j]] * 2),
-                            torch.cat([sample["timesteps"][:, j]] * 2),
+                            torch.cat([batch["latents"][:, j]] * 2),
+                            torch.cat([batch["timesteps"][:, j]] * 2),
                             embeds,
                         ).sample
                         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -569,24 +610,22 @@ class Trainer:
                             noise_pred_text - noise_pred_uncond
                         )
                     else:
-                        noise_pred = self.pipeline.unet(
-                            sample["latents"][:, j], sample["timesteps"][:, j], embeds
-                        ).sample
+                        noise_pred = self.pipeline.unet(batch["latents"][:, j], batch["timesteps"][:, j], embeds).sample
                     # 计算给定latents的next_latents的对数概率
                     _, log_prob = ddim_step_with_logprob(
                         self.pipeline.scheduler,
                         noise_pred,
-                        sample["timesteps"][:, j],
-                        sample["latents"][:, j],
+                        batch["timesteps"][:, j],
+                        batch["latents"][:, j],
                         eta=self.config.sample_eta,
-                        prev_sample=sample["next_latents"][:, j],
+                        prev_sample=batch["next_latents"][:, j],
                     )
 
                 # ppo逻辑
                 advantages = torch.clamp(
-                    sample["advantages"], -self.config.train_adv_clip_max, self.config.train_adv_clip_max
+                    batch["advantages"], -self.config.train_adv_clip_max, self.config.train_adv_clip_max
                 )
-                ratio = torch.exp(log_prob - sample["log_probs"][:, j])
+                ratio = torch.exp(log_prob - batch["log_probs"][:, j])
                 unclipped_loss = -advantages * ratio
                 clipped_loss = -advantages * torch.clamp(
                     ratio, 1.0 - self.config.train_clip_range, 1.0 + self.config.train_clip_range
@@ -597,7 +636,7 @@ class Trainer:
                 # John Schulman说(ratio - 1) - log(ratio)是更好的
                 # 估计器，但大多数现有代码使用这个所以...
                 # http://joschu.net/blog/kl-approx.html
-                info["approx_kl"].append(0.5 * torch.mean((log_prob - sample["log_probs"][:, j]) ** 2))
+                info["approx_kl"].append(0.5 * torch.mean((log_prob - batch["log_probs"][:, j]) ** 2))
                 info["clipfrac"].append(torch.mean((torch.abs(ratio - 1.0) > self.config.train_clip_range).float()))
                 info["loss"].append(loss)
 
