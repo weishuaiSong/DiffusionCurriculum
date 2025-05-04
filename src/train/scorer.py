@@ -11,9 +11,13 @@ def is_answer_match(ans: str, should: str) -> bool:
 
 
 class VQAScorer:
-    def __init__(self, vqa_model_name: str, set_curr_score: Callable[[int], None]) -> None:
+    def __init__(self, vqa_model_name: str, set_curr_score: Callable[[int], None], batch_size: int) -> None:
         self.vqa_pipeline = pipeline(
-            "image-text-to-text", model=vqa_model_name, torch_dtype=torch.bfloat16, device_map="auto"
+            "image-text-to-text",
+            model=vqa_model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            batch_size=batch_size,
         )
         self.set_curr_score = set_curr_score
 

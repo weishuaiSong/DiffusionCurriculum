@@ -23,7 +23,7 @@ class CurriculumTrainerArguments:
 class DiffusionCurriculumTrainer:
     def __init__(self, curriculum_args: CurriculumTrainerArguments, rl_args) -> None:
         prompt_loader = CurriculumPromptLoader(prompt_path=curriculum_args.prompt_filename)
-        scorer_ = VQAScorer(curriculum_args.vqa_model, prompt_loader.set_difficulty)
+        scorer_ = VQAScorer(curriculum_args.vqa_model, prompt_loader.set_difficulty, rl_args.sample_batch_size)
         self.curriculum = Curriculum(strategy=curriculum_args.curriculum_strategy)
 
         # 根据选定的RL算法初始化相应的训练器

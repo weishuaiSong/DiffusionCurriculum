@@ -47,7 +47,7 @@ class Config:
 
     # 训练配置
     num_epochs: int = field(default=100)
-    mixed_precision: str = field(default="fp16")
+    mixed_precision: str = field(default="bf16")
     allow_tf32: bool = field(default=True)
     resume_from: str = field(default="")
 
@@ -151,7 +151,7 @@ class Trainer:
 
         # 加载调度器、分词器和模型
         self.pipeline = StableDiffusionPipeline.from_pretrained(
-            self.config.pretrained_model, revision=self.config.pretrained_revision
+            self.config.pretrained_model, revision=self.config.pretrained_revision, device_map="balanced"
         )
         # 冻结模型参数以节省更多内存
         self.pipeline.vae.requires_grad_(False)
@@ -179,8 +179,9 @@ class Trainer:
             inference_dtype = torch.bfloat16
 
         # 将unet、vae和text_encoder移至设备并转换为inference_dtype
-        self.pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
-        self.pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
+        # self.pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
+        # self.pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
+        self.pipeline = self.accelerator.prepare(self.pipeline)
 
         self.trainable_layers = self.pipeline.unet
 
@@ -216,7 +217,7 @@ class Trainer:
                 padding="max_length",
                 truncation=True,
                 max_length=self.pipeline.tokenizer.model_max_length,
-            ).input_ids.to(self.accelerator.device)
+            ).input_ids
         )[0]
         self.sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.sample_batch_size, 1, 1)
         self.train_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.train_batch_size, 1, 1)
@@ -326,7 +327,7 @@ class Trainer:
                 padding="max_length",
                 truncation=True,
                 max_length=self.pipeline.tokenizer.model_max_length,
-            ).input_ids.to(self.accelerator.device)
+            ).input_ids
             prompt_embeds = self.pipeline.text_encoder(prompt_ids)[0]
 
             # 采样
@@ -366,7 +367,7 @@ class Trainer:
                     padding="max_length",
                     truncation=True,
                     max_length=self.pipeline.tokenizer.model_max_length,
-                ).input_ids.to(self.accelerator.device)
+                ).input_ids
                 eval_prompt_embeds = self.pipeline.text_encoder(eval_prompt_ids)[0]
 
                 # 生成与eval_batch大小匹配的负面提示嵌入
@@ -377,7 +378,7 @@ class Trainer:
                         padding="max_length",
                         truncation=True,
                         max_length=self.pipeline.tokenizer.model_max_length,
-                    ).input_ids.to(self.accelerator.device)
+                    ).input_ids
                 )[0]
                 eval_sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.sample_eval_batch_size, 1, 1)
 
