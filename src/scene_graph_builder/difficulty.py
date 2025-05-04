@@ -4,8 +4,9 @@ import time
 from typing import List, Tuple, Dict
 
 
-def construct_scene_graph(objects: List[str], attributes: Dict[str, List[str]],
-                          relations: List[Tuple[str, str, str]]) -> nx.Graph:
+def construct_scene_graph(
+    objects: List[str], attributes: Dict[str, List[str]], relations: List[Tuple[str, str, str]]
+) -> nx.Graph:
     """
     Construct the scene graph from components.
 
@@ -21,19 +22,19 @@ def construct_scene_graph(objects: List[str], attributes: Dict[str, List[str]],
 
     # Add objects as nodes
     for obj in objects:
-        G.add_node(obj, type='object')
+        G.add_node(obj, type="object")
 
     # Add attributes and connect to objects
     for obj, attrs in attributes.items():
         for attr in attrs:
             attr_node = f"{attr}_{obj}"  # Make attribute nodes unique
-            G.add_node(attr_node, type='attribute')
+            G.add_node(attr_node, type="attribute")
             G.add_edge(obj, attr_node)
 
     # Add relations and connect to objects
     for subj, rel, obj in relations:
         rel_node = f"{rel}_{subj}_{obj}"  # Make relation nodes unique
-        G.add_node(rel_node, type='relation')
+        G.add_node(rel_node, type="relation")
         G.add_edge(subj, rel_node)
         G.add_edge(rel_node, obj)
 
@@ -100,12 +101,12 @@ class SceneGraphDifficulty:
 
         return c
 
-    def calculate_difficulty(self, G: nx.Graph) -> float:
+    def calculate_subgraph_difficulty(self, G: nx.Graph) -> float:
         """
-        Calculate the difficulty score for a scene graph.
+        Calculate the difficulty score for a single scene graph or subgraph.
 
         Args:
-            G: The scene graph as a NetworkX graph
+            G: The scene graph or subgraph as a NetworkX graph
 
         Returns:
             The difficulty score
@@ -126,9 +127,35 @@ class SceneGraphDifficulty:
         constraint_factor = np.std(constraints)
         size_factor = np.log1p(node_count + edge_count)
 
-        difficulty = np.clip(constraint_factor*9 + size_factor, 0, 10)
+        difficulty = np.clip(constraint_factor * 9 + size_factor, 0, 10)
 
         return float(difficulty)
+
+    def calculate_difficulty(self, G: nx.Graph) -> float:
+        """
+        Calculate the difficulty score for a scene graph by finding the maximum
+        difficulty among all connected components (subgraphs).
+
+        Args:
+            G: The scene graph as a NetworkX graph
+
+        Returns:
+            The maximum difficulty score among all subgraphs
+        """
+        if G.number_of_nodes() == 0:
+            return 0.0
+
+        # Find all connected components (subgraphs)
+        subgraphs = [G.subgraph(c) for c in nx.connected_components(G)]
+
+        if not subgraphs:
+            return 0.0
+
+        # Calculate difficulty for each subgraph
+        difficulties = [self.calculate_subgraph_difficulty(sg) for sg in subgraphs]
+
+        # Return the maximum difficulty as the overall difficulty
+        return max(difficulties)
 
 
 def test_cases():
@@ -158,10 +185,7 @@ def test_cases():
     # Test case 2: Simple scene graph (two objects with one relation)
     print("Test Case 2: Simple scene graph")
     objects2 = ["man", "dog"]
-    attributes2 = {
-        "man": ["tall"],
-        "dog": ["brown"]
-    }
+    attributes2 = {"man": ["tall"], "dog": ["brown"]}
     relations2 = [("man", "walking", "dog")]
 
     G2 = construct_scene_graph(objects2, attributes2, relations2)
@@ -179,15 +203,8 @@ def test_cases():
     # Test case 3: Medium scene graph
     print("Test Case 3: Medium scene graph")
     objects3 = ["woman", "car", "tree"]
-    attributes3 = {
-        "woman": ["young", "blonde"],
-        "car": ["red", "shiny"],
-        "tree": ["tall", "green"]
-    }
-    relations3 = [
-        ("woman", "driving", "car"),
-        ("car", "near", "tree")
-    ]
+    attributes3 = {"woman": ["young", "blonde"], "car": ["red", "shiny"], "tree": ["tall", "green"]}
+    relations3 = [("woman", "driving", "car"), ("car", "near", "tree")]
 
     G3 = construct_scene_graph(objects3, attributes3, relations3)
 
@@ -209,7 +226,7 @@ def test_cases():
         "chair": ["comfortable", "blue"],
         "book": ["open", "thick"],
         "lamp": ["bright", "modern"],
-        "cup": ["ceramic", "empty"]
+        "cup": ["ceramic", "empty"],
     }
     relations4 = [
         ("book", "on", "table"),
@@ -217,7 +234,7 @@ def test_cases():
         ("cup", "on", "table"),
         ("chair", "beside", "table"),
         ("lamp", "illuminating", "book"),
-        ("cup", "near", "book")
+        ("cup", "near", "book"),
     ]
 
     G4 = construct_scene_graph(objects4, attributes4, relations4)
@@ -234,8 +251,21 @@ def test_cases():
 
     # Test case 5: Extremely complex scene graph (many objects, attributes, and relations)
     print("Test Case 5: Extremely complex scene graph")
-    objects5 = ["building", "car1", "car2", "car3", "person1", "person2",
-                "person3", "person4", "tree1", "tree2", "dog", "bicycle", "sign"]
+    objects5 = [
+        "building",
+        "car1",
+        "car2",
+        "car3",
+        "person1",
+        "person2",
+        "person3",
+        "person4",
+        "tree1",
+        "tree2",
+        "dog",
+        "bicycle",
+        "sign",
+    ]
     attributes5 = {
         "building": ["tall", "modern", "glass"],
         "car1": ["red", "sedan", "parked"],
@@ -249,7 +279,7 @@ def test_cases():
         "tree2": ["small", "flowering", "colorful"],
         "dog": ["brown", "furry", "excited"],
         "bicycle": ["silver", "mountain", "chained"],
-        "sign": ["stop", "red", "octagonal"]
+        "sign": ["stop", "red", "octagonal"],
     }
     relations5 = [
         ("person1", "entering", "building"),
@@ -271,7 +301,7 @@ def test_cases():
         ("car3", "approaching", "sign"),
         ("person1", "waving at", "person4"),
         ("dog", "looking at", "car3"),
-        ("tree2", "beside", "building")
+        ("tree2", "beside", "building"),
     ]
 
     G5 = construct_scene_graph(objects5, attributes5, relations5)
@@ -292,6 +322,7 @@ def test_cases():
     print(f"Test Case 3 (Medium): {difficulty3:.4f}")
     print(f"Test Case 4 (Complex): {difficulty4:.4f}")
     print(f"Test Case 5 (Extremely complex): {difficulty5:.4f}")
+
 
 if __name__ == "__main__":
     test_cases()
