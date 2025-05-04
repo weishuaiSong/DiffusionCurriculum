@@ -80,7 +80,7 @@ class Config:
     logdir: str = field(default="logs")
     run_name: str = field(default="")
     num_checkpoint_limit: int = field(default=10)
-    save_freq: int = field(default=10)
+    save_freq: int = field(default=1)
 
     # 训练配置
     num_epochs: int = field(default=100)
