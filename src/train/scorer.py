@@ -2,6 +2,7 @@ from typing import Any
 import numpy as np
 import torch
 from torchvision.transforms import ToPILImage
+from transformers import Pipeline
 from transformers.pipelines import pipeline
 from typing import Callable
 
@@ -11,17 +12,12 @@ def is_answer_match(ans: str, should: str) -> bool:
 
 
 class VQAScorer:
-    def __init__(self, vqa_model_name: str, set_curr_score: Callable[[int], None], batch_size: int) -> None:
-        self.vqa_pipeline = pipeline(
-            "image-text-to-text",
-            model=vqa_model_name,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            batch_size=batch_size,
-        )
+    def __init__(self, set_curr_score: Callable[[int], None]) -> None:
         self.set_curr_score = set_curr_score
 
-    def calc_score(self, images: torch.Tensor, prompts: tuple[str], metadata: tuple[Any]) -> torch.Tensor:
+    def calc_score(
+        self, vqa_pipeline: Pipeline, images: torch.Tensor, prompts: tuple[str], metadata: tuple[Any]
+    ) -> torch.Tensor:
         batch_size = len(images)
         scores = []
         to_pil = ToPILImage()
@@ -57,7 +53,7 @@ class VQAScorer:
                 )
         for i in range(0, len(all_qa), batch_size):
             q_with_contents, answers, qa_lens = zip(*all_qa[i : i + batch_size])
-            response = self.vqa_pipeline(text=q_with_contents)  # type: ignore
+            response = vqa_pipeline(text=q_with_contents)  # type: ignore
 
             score = 0
             for i, resp in enumerate(response):

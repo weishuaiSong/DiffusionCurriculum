@@ -23,7 +23,7 @@ class CurriculumTrainerArguments:
 class DiffusionCurriculumTrainer:
     def __init__(self, curriculum_args: CurriculumTrainerArguments, rl_args) -> None:
         prompt_loader = CurriculumPromptLoader(prompt_path=curriculum_args.prompt_filename)
-        scorer_ = VQAScorer(curriculum_args.vqa_model, prompt_loader.set_difficulty, rl_args.sample_batch_size)
+        scorer_ = VQAScorer(prompt_loader.set_difficulty)
         self.curriculum = Curriculum(strategy=curriculum_args.curriculum_strategy)
 
         # 根据选定的RL算法初始化相应的训练器
@@ -45,6 +45,7 @@ class DiffusionCurriculumTrainer:
             )
         elif curriculum_args.rl_algorithm == "ddpo":
             self._trainer = ddpo.Trainer(
+                vqa_model_name=curriculum_args.vqa_model,
                 curriculum=self.curriculum,
                 update_target_difficulty=prompt_loader.set_difficulty,
                 config=rl_args,

@@ -19,6 +19,8 @@ from train.trainer.common.state_tracker import PerPromptStatTracker
 from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 import torch
+from transformers import Pipeline
+from transformers.pipelines import pipeline
 import wandb
 from functools import partial
 import tqdm
@@ -94,8 +96,9 @@ class Trainer:
         curriculum: Curriculum,
         update_target_difficulty: Callable[[int], None],
         config: Config,
-        reward_function: Callable[[torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+        reward_function: Callable[[Pipeline, torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
         prompt_function: Callable[[], tuple[str, Any]],
+        vqa_model_name: str,
     ) -> None:
         self.curriculum = curriculum
         self.update_target_difficulty = update_target_difficulty
@@ -151,7 +154,7 @@ class Trainer:
 
         # 加载调度器、分词器和模型
         self.pipeline = StableDiffusionPipeline.from_pretrained(
-            self.config.pretrained_model, revision=self.config.pretrained_revision, device_map="balanced"
+            self.config.pretrained_model, revision=self.config.pretrained_revision, device_map="balanced", use_fast=True
         )
         # 冻结模型参数以节省更多内存
         self.pipeline.vae.requires_grad_(False)
@@ -182,6 +185,14 @@ class Trainer:
         # self.pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
         # self.pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
         self.pipeline = self.accelerator.prepare(self.pipeline)
+        self.vqa_pipeline = pipeline(
+            "image-text-to-text",
+            model=vqa_model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            batch_size=config.train_batch_size,
+        )
+        self.vqa_pipeline.model = self.accelerator.prepare(self.vqa_pipeline.model)
 
         self.trainable_layers = self.pipeline.unet
 
@@ -349,7 +360,7 @@ class Trainer:
             )  # (batch_size, num_steps)
 
             # 直接计算奖励，不使用executor
-            rewards, reward_metadata = self.reward_fn(images, prompts, prompt_metadata)
+            rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
 
             # eval奖励计算
@@ -396,7 +407,7 @@ class Trainer:
 
                 # 直接计算eval奖励
                 eval_rewards_result, eval_reward_metadata = self.reward_fn(
-                    eval_images, eval_prompts, eval_prompt_metadata
+                    self.vqa_pipeline, eval_images, eval_prompts, eval_prompt_metadata
                 )
                 eval_rewards = torch.as_tensor(eval_rewards_result, device=self.accelerator.device)
 
