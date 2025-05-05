@@ -64,7 +64,7 @@ class VQAScorer:
 
             for i, resp in enumerate(response):
                 answer = resp[0]["generated_text"][-1]["content"]
-                image_to_scores[raw_image] += 1 / qa_lens[i] if is_answer_match(answer, answers[i]) else 0
+                image_to_scores[raw_image] += (1 / qa_lens[i]) if is_answer_match(answer, answers[i]) else 0
 
         # return in same order as input
         for image in images:
