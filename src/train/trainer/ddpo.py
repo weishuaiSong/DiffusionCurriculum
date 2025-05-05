@@ -33,30 +33,6 @@ t = partial(tqdm.tqdm, dynamic_ncols=True)
 logger = get_logger(__name__)
 
 
-class DDPODataset(Dataset):
-    def __init__(
-        self,
-        samples: Dict[str, torch.Tensor],
-        train_batch_size: int,
-    ):
-        """
-        DDPO数据集类
-
-        Args:
-            samples: 采样得到的数据字典
-            train_batch_size: 训练批次大小
-        """
-        self.samples = samples
-        self.train_batch_size = train_batch_size
-        self.total_samples = next(iter(samples.values())).shape[0]
-
-    def __len__(self):
-        return self.total_samples
-
-    def __getitem__(self, idx):
-        return {k: v[idx] for k, v in self.samples.items()}
-
-
 @dataclass
 class Config:
     # 模型配置
@@ -532,27 +508,30 @@ class Trainer:
 
         #################### 训练 ####################
         for inner_epoch in range(self.config.train_num_inner_epochs):
-            # 创建数据集
-            dataset = DDPODataset(samples, self.config.train_batch_size)
-
-            # 创建DataLoader
-            dataloader = DataLoader(
-                dataset,
-                batch_size=self.config.train_batch_size,
-                shuffle=True,
-                num_workers=self.config.num_workers,
-                pin_memory=self.config.dataloader_pin_memory,
-            )
-
-            # 使用accelerate准备DataLoader
-            dataloader = self.accelerator.prepare(dataloader)
-
             # 训练
             self.pipeline.unet.train()
             info = defaultdict(list)
+            # shuffle samples along batch dimension
+            perm = torch.randperm(total_batch_size, device=self.accelerator.device)
+            samples = {k: v[perm] for k, v in samples.items()}
+
+            # shuffle along time dimension independently for each sample
+            perms = torch.stack(
+                [torch.randperm(num_timesteps, device=self.accelerator.device) for _ in range(total_batch_size)]
+            )
+            for key in ["timesteps", "latents", "next_latents", "log_probs"]:
+                samples[key] = samples[key][
+                    torch.arange(total_batch_size, device=self.accelerator.device)[:, None], perms
+                ]
+
+            # rebatch for training
+            samples_batched = {k: v.reshape(-1, self.config.train_batch_size, *v.shape[1:]) for k, v in samples.items()}
+
+            # dict of lists -> list of dicts for easier iteration
+            samples_batched = [dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())]
 
             for i, batch in t(
-                enumerate(dataloader),
+                enumerate(samples_batched),
                 desc=f"Epoch {epoch}.{inner_epoch}: training",
                 position=0,
                 disable=not self.accelerator.is_local_main_process,
