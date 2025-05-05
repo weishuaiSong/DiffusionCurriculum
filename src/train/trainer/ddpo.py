@@ -400,7 +400,7 @@ class Trainer:
 
             # 直接计算奖励，不使用executor
             rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
-            print(prompts.shape, rewards.shape)
+            print(len(prompts), rewards.shape)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
 
             # eval奖励计算
