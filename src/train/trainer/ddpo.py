@@ -193,7 +193,7 @@ class Trainer:
 
         # 加载调度器、分词器和模型
         self.pipeline = StableDiffusionPipeline.from_pretrained(
-            self.config.pretrained_model, revision=self.config.pretrained_revision, device_map="balanced", use_fast=True
+            self.config.pretrained_model, revision=self.config.pretrained_revision, use_fast=True
         )
         # 冻结模型参数以节省更多内存
         self.pipeline.vae.requires_grad_(False)
@@ -520,6 +520,9 @@ class Trainer:
             # 跨进程收集提示
             prompt_ids = self.accelerator.gather(samples["prompt_ids"]).cpu().numpy()
             prompts = self.pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
+            import os
+
+            print(prompts, "prompts", os.getpid())
             advantages = self.stat_tracker.update(prompts, rewards)
         else:
             advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
