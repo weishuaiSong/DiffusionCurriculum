@@ -521,7 +521,6 @@ class Trainer:
             # 跨进程收集提示
             prompt_ids = self.accelerator.gather(samples["prompt_ids"]).cpu().numpy()
             prompts = self.pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
-            import os
 
             advantages = self.stat_tracker.update(prompts, rewards)
         else:

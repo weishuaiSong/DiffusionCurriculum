@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any
 import numpy as np
 import torch
@@ -23,7 +24,9 @@ class VQAScorer:
         to_pil = ToPILImage()
 
         all_qa = []
+        # generate qa for vqa
         for i, image in enumerate(images):
+            raw_image = image
             qa: list[dict[str, str]] = (
                 metadata[i]["qa"]["object"] + metadata[i]["qa"]["relation"] + metadata[i]["qa"]["attribute"]
             )
@@ -49,15 +52,21 @@ class VQAScorer:
                         ],
                         each_qa["answer"],
                         len(qa),
+                        raw_image,
                     )
                 )
+
+        image_to_scores = defaultdict(int)
+        # calc reward in batch
         for i in range(0, len(all_qa), batch_size):
-            q_with_contents, answers, qa_lens = zip(*all_qa[i : i + batch_size])
+            q_with_contents, answers, qa_lens, raw_image = zip(*all_qa[i : i + batch_size])
             response = vqa_pipeline(text=q_with_contents)  # type: ignore
 
-            score = 0
             for i, resp in enumerate(response):
                 answer = resp[0]["generated_text"][-1]["content"]
-                score += 1 / qa_lens[i] if is_answer_match(answer, answers[i]) else 0
-            scores.append(score)
+                image_to_scores[raw_image] += 1 / qa_lens[i] if is_answer_match(answer, answers[i]) else 0
+
+        # return in same order as input
+        for image in images:
+            scores.append(image_to_scores[image])
         return np.array(scores), None  # type: ignore
