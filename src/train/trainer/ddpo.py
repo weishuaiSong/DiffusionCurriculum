@@ -221,9 +221,8 @@ class Trainer:
             inference_dtype = torch.bfloat16
 
         # 将unet、vae和text_encoder移至设备并转换为inference_dtype
-        # self.pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
-        # self.pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
-        self.pipeline = self.accelerator.prepare(self.pipeline)
+        self.pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
+        self.pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
         self.vqa_pipeline = pipeline(
             "image-text-to-text",
             model=vqa_model_name,
@@ -268,7 +267,7 @@ class Trainer:
                 padding="max_length",
                 truncation=True,
                 max_length=self.pipeline.tokenizer.model_max_length,
-            ).input_ids
+            ).input_ids.to(self.accelerator.device)
         )[0]
         self.sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.sample_batch_size, 1, 1)
         self.train_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.train_batch_size, 1, 1)
@@ -378,7 +377,7 @@ class Trainer:
                 padding="max_length",
                 truncation=True,
                 max_length=self.pipeline.tokenizer.model_max_length,
-            ).input_ids
+            ).input_ids.to(self.accelerator.device)
             prompt_embeds = self.pipeline.text_encoder(prompt_ids)[0]
 
             # 采样
@@ -418,7 +417,7 @@ class Trainer:
                     padding="max_length",
                     truncation=True,
                     max_length=self.pipeline.tokenizer.model_max_length,
-                ).input_ids
+                ).input_ids.to(self.accelerator.device)
                 eval_prompt_embeds = self.pipeline.text_encoder(eval_prompt_ids)[0]
 
                 # 生成与eval_batch大小匹配的负面提示嵌入
@@ -429,7 +428,7 @@ class Trainer:
                         padding="max_length",
                         truncation=True,
                         max_length=self.pipeline.tokenizer.model_max_length,
-                    ).input_ids
+                    ).input_ids.to(self.accelerator.device)
                 )[0]
                 eval_sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.sample_eval_batch_size, 1, 1)
 
