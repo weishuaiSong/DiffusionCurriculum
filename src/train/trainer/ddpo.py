@@ -227,16 +227,12 @@ class Trainer:
         self.vqa_pipeline = pipeline(
             "image-text-to-text",
             model=vqa_model_name,
-            torch_dtype=torch.bfloat16,
             device_map="auto",
+            torch_dtype=torch.bfloat16,
             batch_size=config.train_batch_size,
         )
 
         self.vqa_pipeline.model.eval()
-        for p in self.vqa_pipeline.model.parameters():
-            p.requires_grad = False
-
-        self.vqa_pipeline.model = self.accelerator.prepare(self.vqa_pipeline.model)
 
         self.trainable_layers = self.pipeline.unet
 
@@ -499,7 +495,7 @@ class Trainer:
         # 这是一个hack，强制wandb将图像记录为JPEG而不是PNG
         with tempfile.TemporaryDirectory() as tmpdir:
             for i, image in enumerate(images):
-                pil = Image.fromarray((image.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+                pil = Image.fromarray((image.to(torch.float16).cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
                 pil = pil.resize((256, 256))
                 pil.save(os.path.join(tmpdir, f"{i}.jpg"))
             self.accelerator.log(
