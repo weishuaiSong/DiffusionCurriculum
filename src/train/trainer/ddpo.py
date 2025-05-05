@@ -50,16 +50,6 @@ class DDPODataset(Dataset):
         self.train_batch_size = train_batch_size
         self.total_samples = next(iter(samples.values())).shape[0]
 
-        # 沿批次维度打乱样本
-        perm = torch.randperm(self.total_samples)
-        self.samples = {k: v[perm] for k, v in samples.items()}
-
-        # 对每个样本独立地沿时间维度进行打乱
-        total_batch_size, num_timesteps = self.samples["timesteps"].shape
-        self.perms = torch.stack([torch.randperm(num_timesteps) for _ in range(total_batch_size)])
-        for key in ["timesteps", "latents", "next_latents", "log_probs"]:
-            self.samples[key] = self.samples[key][torch.arange(total_batch_size)[:, None], self.perms]
-
     def __len__(self):
         return self.total_samples
 
