@@ -12,15 +12,9 @@ class PerPromptStatTracker:
         prompts = np.array(prompts)
         rewards = np.array(rewards)
         unique = np.unique(prompts)
-        import os
 
-        print(unique, "unique", os.getpid())
         advantages = np.empty_like(rewards)
         for prompt in unique:
-
-            print(prompts.shape, os.getpid())
-            print(prompt.shape, os.getpid())
-            print(rewards.shape, os.getpid())
             prompt_rewards = rewards[prompts == prompt]
             if prompt not in self.stats:
                 self.stats[prompt] = deque(maxlen=self.buffer_size)

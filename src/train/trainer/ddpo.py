@@ -400,6 +400,7 @@ class Trainer:
 
             # 直接计算奖励，不使用executor
             rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
+            print(prompts.shape, rewards.shape)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
 
             # eval奖励计算
@@ -522,7 +523,6 @@ class Trainer:
             prompts = self.pipeline.tokenizer.batch_decode(prompt_ids, skip_special_tokens=True)
             import os
 
-            print(prompts, "prompts", os.getpid())
             advantages = self.stat_tracker.update(prompts, rewards)
         else:
             advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
