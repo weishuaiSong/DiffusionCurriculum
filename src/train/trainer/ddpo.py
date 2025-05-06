@@ -1,5 +1,6 @@
 from collections import defaultdict
 import os
+import contextlib
 import datetime
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -12,6 +13,8 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
 )
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
+from diffusers.loaders import AttnProcsLayers
+from diffusers.models.attention_processor import LoRAAttnProcessor
 
 import numpy as np
 from train.curriculum import Curriculum
@@ -38,6 +41,7 @@ class Config:
     # 模型配置
     pretrained_model: str = field(default="runwayml/stable-diffusion-v1-5")
     pretrained_revision: str = field(default="main")
+    use_lora: bool = field(default=False)
 
     # 随机种子
     seed: int = field(default=42)
@@ -164,7 +168,7 @@ class Trainer:
         # 冻结模型参数以节省更多内存
         self.pipeline.vae.requires_grad_(False)
         self.pipeline.text_encoder.requires_grad_(False)
-        self.pipeline.unet.requires_grad_(True)
+        self.pipeline.unet.requires_grad_(not self.config.use_lora)
         # 禁用安全检查器
         self.pipeline.safety_checker = None
         # 美化进度条
@@ -189,6 +193,8 @@ class Trainer:
         # 将unet、vae和text_encoder移至设备并转换为inference_dtype
         self.pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
         self.pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
+        if self.config.use_lora:
+            self.pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
         self.vqa_pipeline = pipeline(
             "image-text-to-text",
             model=vqa_model_name,
@@ -199,7 +205,27 @@ class Trainer:
 
         self.vqa_pipeline.model.eval()
 
-        self.trainable_layers = self.pipeline.unet
+        if self.config.use_lora:
+            # Set correct lora layers
+            lora_attn_procs = {}
+            for name in self.pipeline.unet.attn_processors.keys():
+                cross_attention_dim = (
+                    None if name.endswith("attn1.processor") else self.pipeline.unet.config.cross_attention_dim
+                )
+                if name.startswith("mid_block"):
+                    hidden_size = self.pipeline.unet.config.block_out_channels[-1]
+                elif name.startswith("up_blocks"):
+                    block_id = int(name[len("up_blocks.")])
+                    hidden_size = list(reversed(self.pipeline.unet.config.block_out_channels))[block_id]
+                elif name.startswith("down_blocks"):
+                    block_id = int(name[len("down_blocks.")])
+                    hidden_size = self.pipeline.unet.config.block_out_channels[block_id]
+
+                lora_attn_procs[name] = LoRAAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim)
+            self.pipeline.unet.set_attn_processor(lora_attn_procs)
+            self.trainable_layers = AttnProcsLayers(self.pipeline.unet.attn_processors)
+        else:
+            self.trainable_layers = self.pipeline.unet
 
         # 设置使用Accelerate的diffusers友好的检查点保存
         self.accelerator.register_save_state_pre_hook(self._save_model_hook)
@@ -247,7 +273,7 @@ class Trainer:
             )
 
         # 出于某种原因，对于非lora训练autocast是必要的，但对于lora训练它不是必要的，而且会使用更多内存
-        self.autocast = self.accelerator.autocast
+        self.autocast = contextlib.nullcontext if self.config.use_lora else self.accelerator.autocast
 
         # 使用`accelerator`准备所有内容
         self.trainable_layers, self.optimizer = self.accelerator.prepare(self.trainable_layers, self.optimizer)
@@ -275,13 +301,15 @@ class Trainer:
         else:
             self.first_epoch = 0
 
-    def _save_model_hook(self, models, weights, output_dir):
+    def _save_model_hook(models, weights, output_dir):
         assert len(models) == 1
-        if isinstance(models[0], UNet2DConditionModel):
+        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
+            self.pipeline.unet.save_attn_procs(output_dir)
+        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
             models[0].save_pretrained(os.path.join(output_dir, "unet"))
         else:
             raise ValueError(f"Unknown model type {type(models[0])}")
-        weights.pop()  # 确保accelerate不尝试处理模型的保存
+        weights.pop()  # ensures that accelerate doesn't try to handle saving of the model
 
     def _fix_seed(self):
         assert self.accelerator, "should call after init accelerator"
@@ -291,16 +319,24 @@ class Trainer:
         device_seed = random_seeds[self.accelerator.process_index]  # type: ignore
         set_seed(int(device_seed), device_specific=True)
 
-    def _load_model_hook(self, models, input_dir):
+    def _load_model_hook(models, input_dir):
         assert len(models) == 1
-        if isinstance(models[0], UNet2DConditionModel):
+        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
+            # pipeline.unet.load_attn_procs(input_dir)
+            tmp_unet = UNet2DConditionModel.from_pretrained(
+                self.config.pretrained.model, revision=self.config.pretrained.revision, subfolder="unet"
+            )
+            tmp_unet.load_attn_procs(input_dir)
+            models[0].load_state_dict(AttnProcsLayers(tmp_unet.attn_processors).state_dict())
+            del tmp_unet
+        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
             load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
             models[0].register_to_config(**load_model.config)
             models[0].load_state_dict(load_model.state_dict())
             del load_model
         else:
             raise ValueError(f"Unknown model type {type(models[0])}")
-        models.pop()  # 确保accelerate不尝试处理模型的加载
+        models.pop()
 
     def train(self):
         """执行训练过程"""
@@ -366,7 +402,6 @@ class Trainer:
 
             # 直接计算奖励，不使用executor
             rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
-            print(len(prompts), rewards.shape)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
 
             # eval奖励计算
@@ -426,7 +461,7 @@ class Trainer:
                     "next_latents": latents[:, 1:],  # 每个条目是时间步t之后的潜在变量
                     "log_probs": log_probs,
                     "rewards": rewards,
-                    "eval_rewards": eval_rewards,
+                    # "eval_rewards": eval_rewards,
                 }
             )
 
@@ -501,6 +536,7 @@ class Trainer:
 
         del samples["rewards"]
         del samples["prompt_ids"]
+        # del samples["eval_rewards"]
 
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert total_batch_size == self.config.sample_batch_size * self.config.sample_num_batches_per_epoch
@@ -543,8 +579,11 @@ class Trainer:
             # 确保我们在内部epoch结束时执行了优化步骤
             assert self.accelerator.sync_gradients
 
-        if epoch != 0 and epoch % self.config.save_freq == 0 and self.accelerator.is_main_process:
+        if epoch != 0 and epoch % self.config.save_freq == 0:
+        # and self.accelerator.is_main_process:
+            print("Start saving...")
             self.accelerator.save_state()
+            print("Save finished!")
 
         return global_step
 
