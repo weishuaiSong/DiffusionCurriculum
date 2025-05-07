@@ -373,6 +373,8 @@ class Trainer:
             disable=not self.accelerator.is_local_main_process,
             position=0,
         ):
+            difficulty = self.curriculum.infer_target_difficulty({"current_step": i})
+            self.update_target_difficulty(difficulty)
             # 生成提示
             prompts, prompt_metadata = zip(*[self.prompt_fn() for _ in range(self.config.sample_batch_size)])
 
@@ -551,9 +553,6 @@ class Trainer:
             # 训练
             self.pipeline.unet.train()
             info = defaultdict(list)
-            # shuffle samples along batch dimension
-            perm = torch.randperm(total_batch_size, device=self.accelerator.device)
-            samples = {k: v[perm] for k, v in samples.items()}
 
             # shuffle along time dimension independently for each sample
             perms = torch.stack(
@@ -577,8 +576,6 @@ class Trainer:
                 disable=not self.accelerator.is_local_main_process,
             ):
                 self.step(batch, i, epoch, inner_epoch, global_step, info)
-                difficulty = self.curriculum.infer_target_difficulty({"current_step": global_step})
-                self.update_target_difficulty(difficulty)
                 # 这里每个样本后递增global_step
                 global_step += 1
 
