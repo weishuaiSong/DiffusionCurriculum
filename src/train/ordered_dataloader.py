@@ -22,7 +22,7 @@ class CurriculumPromptLoader:
     def init(self, accelerator: accelerate.Accelerator):
         self.accelerator = accelerator
         total = 0
-        logger.info(f"initial index: {self.accelerator.process_index}")
+        logger.info(f"initial index: {self.accelerator.process_index}, num process: {self.accelerator.num_processes}")
         for difficulty_str, prompts in json.loads(self.prompt_path.read_text()).items():
             total += len(prompts)
             self.difficulty_to_prompts[self._extract_difficulty(difficulty_str)] = prompts

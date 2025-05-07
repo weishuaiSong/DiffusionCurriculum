@@ -1,10 +1,13 @@
+import logging
 from train.trainer import dpok, d3po, ddpo
 from train.train import CurriculumTrainerArguments, DiffusionCurriculumTrainer
 from transformers.hf_argparser import HfArgumentParser
+from utils import setup_logger
 import sys
 
 
 def main():
+    setup_logger(logging.INFO)
     # 首先只解析课程学习参数，以确定使用哪个RL算法
     parser = HfArgumentParser(CurriculumTrainerArguments)
     curriculum_args, unknown_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
