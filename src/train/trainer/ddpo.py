@@ -53,7 +53,7 @@ class Config:
     save_freq: int = field(default=1)
 
     # 训练配置
-    num_epochs: int = field(default=100)
+    num_epochs: int = field(default=10)
     mixed_precision: str = field(default="bf16")
     allow_tf32: bool = field(default=True)
     resume_from: str = field(default="")
@@ -305,16 +305,6 @@ class Trainer:
         else:
             self.first_epoch = 0
 
-    def _save_model_hook(models, weights, output_dir):
-        assert len(models) == 1
-        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
-            self.pipeline.unet.save_attn_procs(output_dir)
-        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
-            models[0].save_pretrained(os.path.join(output_dir, "unet"))
-        else:
-            raise ValueError(f"Unknown model type {type(models[0])}")
-        weights.pop()  # ensures that accelerate doesn't try to handle saving of the model
-
     def _fix_seed(self):
         assert self.accelerator, "should call after init accelerator"
         # set seed (device_specific is very important to get different prompts on different devices)
@@ -323,7 +313,17 @@ class Trainer:
         device_seed = random_seeds[self.accelerator.process_index]  # type: ignore
         set_seed(int(device_seed), device_specific=True)
 
-    def _load_model_hook(models, input_dir):
+    def _save_model_hook(self, models, weights, output_dir):
+        assert len(models) == 1
+        if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
+            self.pipeline.unet.save_attn_procs(output_dir)
+        elif not self.config.use_lora and isinstance(models[0], UNet2DConditionModel):
+            models[0].save_pretrained(os.path.join(output_dir, "unet"))
+        else:
+            raise ValueError(f"Unknown model type {type(models[0])}")
+        weights.pop()
+
+    def _load_model_hook(self, models, input_dir):
         assert len(models) == 1
         if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
             # pipeline.unet.load_attn_procs(input_dir)
@@ -553,15 +553,6 @@ class Trainer:
             # 训练
             self.pipeline.unet.train()
             info = defaultdict(list)
-
-            # shuffle along time dimension independently for each sample
-            perms = torch.stack(
-                [torch.randperm(num_timesteps, device=self.accelerator.device) for _ in range(total_batch_size)]
-            )
-            for key in ["timesteps", "latents", "next_latents", "log_probs"]:
-                samples[key] = samples[key][
-                    torch.arange(total_batch_size, device=self.accelerator.device)[:, None], perms
-                ]
 
             # rebatch for training
             samples_batched = {k: v.reshape(-1, self.config.train_batch_size, *v.shape[1:]) for k, v in samples.items()}

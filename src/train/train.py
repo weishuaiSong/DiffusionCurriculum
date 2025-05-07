@@ -9,7 +9,7 @@ from train.trainer import dpok, d3po, ddpo
 class CurriculumTrainerArguments:
     prompt_filename: str = field()
     vqa_model: str = field(
-        default="llava-hf/llava-v1.6-mistral-7b-hf", metadata={"help": "the pretrained model to use"}
+        default="llava-hf/llava-1.5-7b-hf", metadata={"help": "the pretrained model to use"}
     )
     curriculum_strategy: str = field(
         default="timestep", metadata={"help": "The curriculum strategy to use for training."}
