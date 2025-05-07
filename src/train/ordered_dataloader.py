@@ -34,7 +34,7 @@ class CurriculumPromptLoader:
 
     def next(self) -> tuple[str, Any]:
         assert self.accelerator and self.t, "not initialize"
-        self.t.update(1)
+        self.t.update(self.accelerator.num_processes)
         if self.difficulty_to_prompts_idx[self.current_difficulty] >= len(
             self.difficulty_to_prompts[self.current_difficulty]
         ):
