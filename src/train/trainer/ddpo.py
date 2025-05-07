@@ -577,7 +577,7 @@ class Trainer:
                 disable=not self.accelerator.is_local_main_process,
             ):
                 self.step(batch, i, epoch, inner_epoch, global_step, info)
-                self.update_target_difficulty(max(3 + i * (len(samples_batched) // 20), 22))
+                self.update_target_difficulty(min(3 + i * (len(samples_batched) // 20), 22))
                 # 这里每个样本后递增global_step
                 global_step += 1
 
