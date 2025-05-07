@@ -17,23 +17,22 @@ class VQAScorer:
         self.set_curr_score = set_curr_score
 
     def calc_score(
-        self, vqa_pipeline: Pipeline, images: torch.Tensor, prompts: tuple[str], metadata: tuple[Any]
-    ) -> torch.Tensor:
+            self, vqa_pipeline: Pipeline, images: torch.Tensor, prompts: tuple[str], metadata: tuple[Any]
+    ):
         batch_size = len(images)
-        scores = []
+        scores = [0.0] * len(images)
         to_pil = ToPILImage()
 
-        all_qa = []
-        # generate qa for vqa
+        vqa_samples = []
+
         for i, image in enumerate(images):
-            raw_image = image
-            qa: list[dict[str, str]] = (
-                metadata[i]["qa"]["object"] + metadata[i]["qa"]["relation"] + metadata[i]["qa"]["attribute"]
+            all_qa: list[dict[str, str]] = (
+                    metadata[i]["qa"]["object"] + metadata[i]["qa"]["relation"] + metadata[i]["qa"]["attribute"]
             )
             if isinstance(image, torch.Tensor):
-                image = to_pil(image.to(torch.float))
-            for each_qa in qa:
-                all_qa.append(
+                pil_image = to_pil(image.to(torch.float))
+            for each_qa in all_qa:
+                vqa_samples.append(
                     (
                         [
                             {
@@ -41,32 +40,28 @@ class VQAScorer:
                                 "content": [
                                     {
                                         "type": "image",
-                                        "image": image,
+                                        "image": pil_image,
                                     },
                                     {
                                         "type": "text",
-                                        "text": each_qa["question"],
+                                        "text": f"Based on the image, answer the question. Only output yes or no.\nQuestion: {each_qa["question"]}\nAnswer:",
                                     },
                                 ],
                             }
                         ],
                         each_qa["answer"],
-                        len(qa),
-                        raw_image,
+                        len(all_qa),
+                        i,
                     )
                 )
 
-        image_to_scores = defaultdict(int)
         # calc reward in batch
-        for i in range(0, len(all_qa), batch_size):
-            q_with_contents, answers, qa_lens, raw_image = zip(*all_qa[i : i + batch_size])
-            response = vqa_pipeline(text=q_with_contents)  # type: ignore
+        for i in range(0, len(vqa_samples), batch_size):
+            q_with_image, answers, qa_lens, img_indices = zip(*vqa_samples[i: i + batch_size])
+            responses = vqa_pipeline(text=q_with_image)  # type: ignore
 
-            for i, resp in enumerate(response):
-                answer = resp[0]["generated_text"][-1]["content"]
-                image_to_scores[raw_image] += (1 / qa_lens[i]) if is_answer_match(answer, answers[i]) else 0
+            for response, answer, qa_len, img_idx in zip(responses, answers, qa_lens, img_indices):
+                generated_answer = response[0]["generated_text"][-1]["content"]
+                scores[img_idx] += (1 / qa_len) if is_answer_match(generated_answer, answer) else 0
 
-        # return in same order as input
-        for image in images:
-            scores.append(image_to_scores[image])
         return np.array(scores), None  # type: ignore

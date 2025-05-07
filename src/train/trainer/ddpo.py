@@ -305,14 +305,6 @@ class Trainer:
         else:
             self.first_epoch = 0
 
-    def _fix_seed(self):
-        assert self.accelerator, "should call after init accelerator"
-        # set seed (device_specific is very important to get different prompts on different devices)
-        np.random.seed(self.config.seed or 114514)
-        random_seeds = np.random.randint(0, 100000, size=self.available_devices)
-        device_seed = random_seeds[self.accelerator.process_index]  # type: ignore
-        set_seed(int(device_seed), device_specific=True)
-
     def _save_model_hook(self, models, weights, output_dir):
         assert len(models) == 1
         if self.config.use_lora and isinstance(models[0], AttnProcsLayers):
@@ -321,7 +313,15 @@ class Trainer:
             models[0].save_pretrained(os.path.join(output_dir, "unet"))
         else:
             raise ValueError(f"Unknown model type {type(models[0])}")
-        weights.pop()
+        weights.pop()  # ensures that accelerate doesn't try to handle saving of the model
+
+    def _fix_seed(self):
+        assert self.accelerator, "should call after init accelerator"
+        # set seed (device_specific is very important to get different prompts on different devices)
+        np.random.seed(self.config.seed or 114514)
+        random_seeds = np.random.randint(0, 100000, size=self.available_devices)
+        device_seed = random_seeds[self.accelerator.process_index]  # type: ignore
+        set_seed(int(device_seed), device_specific=True)
 
     def _load_model_hook(self, models, input_dir):
         assert len(models) == 1
@@ -410,54 +410,6 @@ class Trainer:
             rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
 
-            # eval奖励计算
-            eval_rewards = None
-            eval_reward_metadata = None
-            if epoch % self.config.sample_eval_epoch == 0:
-                eval_prompts, eval_prompt_metadata = zip(
-                    *[self.prompt_fn() for _ in range(self.config.sample_eval_batch_size)]
-                )
-
-                # 编码提示
-                eval_prompt_ids = self.pipeline.tokenizer(
-                    eval_prompts,
-                    return_tensors="pt",
-                    padding="max_length",
-                    truncation=True,
-                    max_length=self.pipeline.tokenizer.model_max_length,
-                ).input_ids.to(self.accelerator.device)
-                eval_prompt_embeds = self.pipeline.text_encoder(eval_prompt_ids)[0]
-
-                # 生成与eval_batch大小匹配的负面提示嵌入
-                neg_prompt_embed = self.pipeline.text_encoder(
-                    self.pipeline.tokenizer(
-                        [""],
-                        return_tensors="pt",
-                        padding="max_length",
-                        truncation=True,
-                        max_length=self.pipeline.tokenizer.model_max_length,
-                    ).input_ids.to(self.accelerator.device)
-                )[0]
-                eval_sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.sample_eval_batch_size, 1, 1)
-
-                # 采样
-                with self.autocast():
-                    eval_images, _, _, _ = pipeline_with_logprob(
-                        self.pipeline,
-                        prompt_embeds=eval_prompt_embeds,
-                        negative_prompt_embeds=eval_sample_neg_prompt_embeds,
-                        num_inference_steps=self.config.sample_num_steps,
-                        guidance_scale=self.config.sample_guidance_scale,
-                        eta=self.config.sample_eta,
-                        output_type="pt",
-                    )
-
-                # 直接计算eval奖励
-                eval_rewards_result, eval_reward_metadata = self.reward_fn(
-                    self.vqa_pipeline, eval_images, eval_prompts, eval_prompt_metadata
-                )
-                eval_rewards = torch.as_tensor(eval_rewards_result, device=self.accelerator.device)
-
             samples.append(
                 {
                     "prompt_ids": prompt_ids,
@@ -467,7 +419,6 @@ class Trainer:
                     "next_latents": latents[:, 1:],  # 每个条目是时间步t之后的潜在变量
                     "log_probs": log_probs,
                     "rewards": rewards,
-                    # "eval_rewards": eval_rewards,
                 }
             )
 
@@ -477,28 +428,15 @@ class Trainer:
         # 跨进程收集奖励
         rewards = self.accelerator.gather(zip_samples["rewards"]).cpu().numpy()
 
-        # 记录奖励和图像
-        if "eval_rewards" in zip_samples:
-            eval_rewards = self.accelerator.gather(zip_samples["eval_rewards"]).cpu().numpy()
-            self.accelerator.log(
-                {
-                    "reward": eval_rewards,
-                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
-                    "reward_mean": eval_rewards.mean(),
-                    "reward_std": eval_rewards.std(),
-                },
-                step=global_step,
-            )
-        else:
-            self.accelerator.log(
-                {
-                    "reward": rewards,
-                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
-                    "reward_mean": rewards.mean(),
-                    "reward_std": rewards.std(),
-                },
-                step=global_step,
-            )
+        self.accelerator.log(
+            {
+                "reward": rewards,
+                "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
+                "reward_mean": rewards.mean(),
+                "reward_std": rewards.std(),
+            },
+            step=global_step,
+        )
         # 这是一个hack，强制wandb将图像记录为JPEG而不是PNG
         with tempfile.TemporaryDirectory() as tmpdir:
             for i, image in enumerate(images):
@@ -542,7 +480,6 @@ class Trainer:
 
         del samples["rewards"]
         del samples["prompt_ids"]
-        # del samples["eval_rewards"]
 
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert total_batch_size == self.config.sample_batch_size * self.config.sample_num_batches_per_epoch
