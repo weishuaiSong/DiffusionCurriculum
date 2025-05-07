@@ -9,7 +9,7 @@ class Curriculum:
     def infer_target_difficulty(self, metadata: dict[str, Any]) -> int:
         if self.strategy == "random":
             # TODO: 需要传进来难度scale，或者我们后面定好
-            return random.randint(2, 22)
+            return random.randint(3, 22)
         elif self.strategy == "reward":
             return self._reward_based_infer(metadata)
         elif self.strategy == "timestep":
@@ -21,4 +21,4 @@ class Curriculum:
         pass
 
     def _timestep_based_infer(self, metadata: dict[str, Any]) -> int:
-        return min(metadata["current_step"] // 32 + 3, 22)
+        return min(min(0, metadata["current_step"] // 7) + 3, 22)

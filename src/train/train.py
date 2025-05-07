@@ -12,7 +12,7 @@ class CurriculumTrainerArguments:
         default="llava-hf/llava-v1.6-mistral-7b-hf", metadata={"help": "the pretrained model to use"}
     )
     curriculum_strategy: str = field(
-        default="random", metadata={"help": "The curriculum strategy to use for training."}
+        default="timestep", metadata={"help": "The curriculum strategy to use for training."}
     )
     rl_algorithm: str = field(
         default="ddpo",
