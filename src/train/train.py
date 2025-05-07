@@ -49,6 +49,7 @@ class DiffusionCurriculumTrainer:
                 curriculum=self.curriculum,
                 update_target_difficulty=prompt_loader.set_difficulty,
                 config=rl_args,
+                reward_init_function=prompt_loader.init,
                 reward_function=scorer_.calc_score,
                 prompt_function=prompt_loader.next,
             )

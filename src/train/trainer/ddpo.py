@@ -106,6 +106,7 @@ class Trainer:
         update_target_difficulty: Callable[[int], None],
         config: Config,
         reward_function: Callable[[Pipeline, torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+        reward_init_function: Callable[[Accelerator], None],
         prompt_function: Callable[[], tuple[str, Any]],
         vqa_model_name: str,
     ) -> None:
@@ -150,6 +151,7 @@ class Trainer:
             # 要跨累积的优化器步骤的总数。
             gradient_accumulation_steps=self.config.train_gradient_accumulation_steps * self.num_train_timesteps,
         )
+        reward_init_function(self.accelerator)
         self.available_devices = self.accelerator.num_processes
         self._fix_seed()
 
@@ -221,7 +223,9 @@ class Trainer:
                     block_id = int(name[len("down_blocks.")])
                     hidden_size = self.pipeline.unet.config.block_out_channels[block_id]
 
-                lora_attn_procs[name] = LoRAAttnProcessor(hidden_size=hidden_size, cross_attention_dim=cross_attention_dim)
+                lora_attn_procs[name] = LoRAAttnProcessor(
+                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim
+                )
             self.pipeline.unet.set_attn_processor(lora_attn_procs)
             self.trainable_layers = AttnProcsLayers(self.pipeline.unet.attn_processors)
         else:
@@ -580,7 +584,7 @@ class Trainer:
             assert self.accelerator.sync_gradients
 
         if epoch != 0 and epoch % self.config.save_freq == 0:
-        # and self.accelerator.is_main_process:
+            # and self.accelerator.is_main_process:
             print("Start saving...")
             self.accelerator.save_state()
             print("Save finished!")
