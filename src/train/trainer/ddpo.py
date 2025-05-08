@@ -3,7 +3,7 @@ import os
 import contextlib
 import datetime
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
@@ -22,6 +22,7 @@ from train.trainer.common.state_tracker import PerPromptStatTracker
 from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 import torch
+from torch.utils.data import Dataset, DataLoader
 from transformers import Pipeline
 from transformers.pipelines import pipeline
 import wandb
@@ -52,14 +53,14 @@ class Config:
     save_freq: int = field(default=1)
 
     # 训练配置
-    num_epochs: int = field(default=10)
+    num_epochs: int = field(default=1)
     mixed_precision: str = field(default="bf16")
     allow_tf32: bool = field(default=True)
     resume_from: str = field(default="")
 
     # 采样配置
     sample_num_steps: int = field(default=50)
-    sample_eta: float = field(default=0.0)
+    sample_eta: float = field(default=1.0)
     sample_guidance_scale: float = field(default=5.0)
     sample_batch_size: int = field(default=4)
     sample_num_batches_per_epoch: int = field(default=4)
@@ -497,7 +498,7 @@ class Trainer:
             samples_batched = [dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())]
 
             for i, batch in t(
-                enumerate(samples_batched),
+                list(enumerate(samples_batched)),
                 desc=f"Epoch {epoch}.{inner_epoch}: training",
                 position=0,
                 disable=not self.accelerator.is_local_main_process,
@@ -509,7 +510,7 @@ class Trainer:
             # 确保我们在内部epoch结束时执行了优化步骤
             assert self.accelerator.sync_gradients
 
-        if epoch != 0 and epoch % self.config.save_freq == 0:
+        if epoch % self.config.save_freq == 0:
             # and self.accelerator.is_main_process:
             print("Start saving...")
             self.accelerator.save_state()
