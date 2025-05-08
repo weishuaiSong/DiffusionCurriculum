@@ -3,7 +3,6 @@ from collections import defaultdict
 import os
 import copy
 import datetime
-from concurrent import futures
 from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 from accelerate import Accelerator
@@ -313,9 +312,6 @@ class Trainer:
         # 使用`accelerator`准备所有内容
         self.trainable_layers, self.optimizer = self.accelerator.prepare(self.trainable_layers, self.optimizer)
 
-        # 执行器异步执行回调。这对于llava回调是有益的，它向运行llava推理的远程服务器发出请求。
-        self.executor = futures.ThreadPoolExecutor(max_workers=2)
-
         # 计算每个epoch的样本数和批次大小
         self.samples_per_epoch = (
             self.config.sample_batch_size * self.accelerator.num_processes * self.config.sample_num_batches_per_epoch
@@ -493,10 +489,9 @@ class Trainer:
                 self.config.sample_batch_size, 1
             )  # (batch_size, num_steps)
 
-            # 异步计算奖励
-            rewards1 = self.executor.submit(self.reward_fn, images1, prompts1, prompt_metadata).result()[0]
-            # 让步以确保奖励计算开始
-            rewards2 = self.executor.submit(self.reward_fn, images2, prompts2, prompt_metadata).result()[0]
+            # 直接计算奖励，不使用executor
+            rewards1, reward_metadata = self.reward_fn(self.vqa_pipeline, images1, prompts1, prompt_metadata)
+            rewards2, reward_metadata = self.reward_fn(self.vqa_pipeline, images2, prompts2, prompt_metadata)
             if isinstance(rewards1, np.ndarray):
                 rewards = np.c_[rewards1, rewards2]
             else:
@@ -534,9 +529,9 @@ class Trainer:
                         eta=self.config.sample_eta,
                         output_type="pt",
                     )
-                eval_rewards = self.executor.submit(
-                    self.reward_fn, eval_images, eval_prompts, eval_prompt_metadata
-                ).result()[0]
+                eval_rewards, eval_reward_metadata = self.reward_fn(
+                    self.vqa_pipeline, eval_images, eval_prompts, eval_prompt_metadata
+                )
                 samples.append(
                     {
                         "prompt_embeds": prompt_embeds,
