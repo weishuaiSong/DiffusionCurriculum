@@ -62,8 +62,6 @@ class Config:
     sample_guidance_scale: float = field(default=5.0)
     sample_batch_size: int = field(default=4)
     sample_num_batches_per_epoch: int = field(default=4)
-    sample_eval_batch_size: int = field(default=4)
-    sample_eval_epoch: int = field(default=5)
 
     # 训练配置
     train_batch_size: int = field(default=1)
@@ -101,7 +99,6 @@ class Config:
     sd_model: str = field(default="runwayml/stable-diffusion-v1-5")
     sd_revision: str = field(default="main")
     learning_rate: float = field(default=1e-4)
-    eval_epoch: int = field(default=2)
 
     # 采样相关配置
     sample_num_step: int = field(default=50)
@@ -502,66 +499,19 @@ class Trainer:
                 rewards2 = rewards2.cpu().detach().numpy()
                 rewards = np.c_[rewards1, rewards2]
 
-            eval_rewards = None
-            if epoch % self.config.eval_epoch == 0:
-                eval_prompts, eval_prompt_metadata = zip(
-                    *[self.prompt_fn() for _ in range(self.config.sample_eval_batch_size)]
-                )
-
-                # 编码提示词
-                eval_prompt_ids = self.sd_pipeline.tokenizer(
-                    eval_prompts,
-                    return_tensors="pt",
-                    padding="max_length",
-                    truncation=True,
-                    max_length=self.sd_pipeline.tokenizer.model_max_length,
-                ).input_ids.to(self.accelerator.device)
-                eval_prompt_embeds = self.sd_pipeline.text_encoder(eval_prompt_ids)[0]
-                eval_sample_neg_prompt_embeds = self.sample_neg_prompt_embeds.repeat(
-                    self.config.sample_eval_batch_size // self.config.sample_batch_size, 1, 1
-                )
-
-                # 采样
-                with self.autocast():
-                    eval_images, _, _, _ = pipeline_with_logprob(
-                        self.sd_pipeline,
-                        prompt_embeds=eval_prompt_embeds,
-                        negative_prompt_embeds=eval_sample_neg_prompt_embeds,
-                        num_inference_steps=self.config.sample_num_steps,
-                        guidance_scale=self.config.sample_guidance_scale,
-                        eta=self.config.sample_eta,
-                        output_type="pt",
-                    )
-                eval_rewards, eval_reward_metadata = self.reward_fn(
-                    self.vqa_pipeline, eval_images, eval_prompts, eval_prompt_metadata
-                )
-                samples.append(
-                    {
-                        "prompt_embeds": prompt_embeds,
-                        "prompts": prompts1,
-                        "timesteps": timesteps,
-                        "latents": current_latents,  # 每个条目是时间步t之前的潜变量
-                        "next_latents": next_latents,  # 每个条目是时间步t之后的潜变量
-                        "log_probs": log_probs,
-                        "images": images,
-                        "rewards": torch.as_tensor(rewards, device=self.accelerator.device),
-                        "eval_rewards": torch.as_tensor(eval_rewards, device=self.accelerator.device),
-                    }
-                )
-            else:
-                prompts1 = list(prompts1)
-                samples.append(
-                    {
-                        "prompt_embeds": prompt_embeds,
-                        "prompts": prompts1,
-                        "timesteps": timesteps,
-                        "latents": current_latents,
-                        "next_latents": next_latents,
-                        "log_probs": log_probs,
-                        "images": images,
-                        "rewards": torch.as_tensor(rewards, device=self.accelerator.device),
-                    }
-                )
+            prompts1 = list(prompts1)
+            samples.append(
+                {
+                    "prompt_embeds": prompt_embeds,
+                    "prompts": prompts1,
+                    "timesteps": timesteps,
+                    "latents": current_latents,
+                    "next_latents": next_latents,
+                    "log_probs": log_probs,
+                    "images": images,
+                    "rewards": torch.as_tensor(rewards, device=self.accelerator.device),
+                }
+            )
 
         prompts = samples[0]["prompts"]
         del samples[0]["prompts"]
@@ -569,29 +519,15 @@ class Trainer:
         images = samples["images"]
         rewards = self.accelerator.gather(samples["rewards"]).cpu().numpy()
 
-        # 记录基于奖励模型的更好图像奖励
-        if "eval_rewards" in samples:
-            eval_rewards = self.accelerator.gather(samples["eval_rewards"]).cpu().numpy()
-            self.accelerator.log(
-                {
-                    "eval_reward": eval_rewards,
-                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
-                    "eval_reward_mean": eval_rewards.mean(),
-                    "eval_reward_std": eval_rewards.std(),
-                },
-                step=global_step,
-            )
-            del samples["eval_rewards"]
-        else:
-            self.accelerator.log(
-                {
-                    "reward": rewards,
-                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
-                    "reward_mean": rewards.mean(),
-                    "reward_std": rewards.std(),
-                },
-                step=global_step,
-            )
+        self.accelerator.log(
+            {
+                "reward": rewards,
+                "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
+                "reward_mean": rewards.mean(),
+                "reward_std": rewards.std(),
+            },
+            step=global_step,
+        )
 
         # 这是一个hack，强制wandb将图像记录为JPEG而不是PNG
         with tempfile.TemporaryDirectory() as tmpdir:
