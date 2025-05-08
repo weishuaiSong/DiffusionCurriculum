@@ -225,8 +225,11 @@ class Trainer:
         # 将unet、vae和text_encoder移至设备并转换为inference_dtype
         self.sd_pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
         self.sd_pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
-        if self.config.use_lora:
-            self.sd_pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
+        self.sd_pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
+        self.ref = copy.deepcopy(self.sd_pipeline.unet)
+        for param in ref.parameters():
+            param.requires_grad = False
+
         self.vqa_pipeline = pipeline(
             "image-text-to-text",
             model=vqa_model_name,
