@@ -5,7 +5,6 @@ import copy
 import datetime
 from concurrent import futures
 from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
-
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
@@ -15,6 +14,8 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
     StableDiffusionPipeline,
 )
+from diffusers.loaders import AttnProcsLayers
+from diffusers.models.attention_processor import LoRAAttnProcessor
 import numpy as np
 import torch
 import wandb
@@ -23,8 +24,11 @@ import tqdm
 import tempfile
 from PIL import Image
 from typing import Any, Callable
+from transformers import Pipeline
+from transformers.pipelines import pipeline
 
 from train.curriculum import Curriculum
+from train.trainer.common.state_tracker import PerPromptStatTracker
 
 t = partial(tqdm.tqdm, dynamic_ncols=True)
 
@@ -33,37 +37,78 @@ logger = get_logger(__name__)
 
 @dataclass
 class Config:
-    sample_num_step: int = field(default=50)
-    train_num_step: int = field(default=1000)
-    timestep_fraction: float = field(default=0.8)
+    # 模型配置
+    pretrained_model: str = field(default="runwayml/stable-diffusion-v1-5")
+    pretrained_revision: str = field(default="main")
+    use_lora: bool = field(default=False)
+
+    # 随机种子
+    seed: int = field(default=42)
+
+    # 日志和检查点配置
+    logdir: str = field(default="logs")
+    run_name: str = field(default="")
+    num_checkpoint_limit: int = field(default=10)
+    save_freq: int = field(default=1)
+
+    # 训练配置
+    num_epochs: int = field(default=10)
+    mixed_precision: str = field(default="bf16")
+    allow_tf32: bool = field(default=True)
+    resume_from: str = field(default="")
+
+    # 采样配置
+    sample_num_steps: int = field(default=50)
+    sample_eta: float = field(default=0.0)
+    sample_guidance_scale: float = field(default=5.0)
+    sample_batch_size: int = field(default=4)
+    sample_num_batches_per_epoch: int = field(default=4)
+    sample_eval_batch_size: int = field(default=4)
+    sample_eval_epoch: int = field(default=5)
+
+    # 训练配置
+    train_batch_size: int = field(default=1)
+    train_learning_rate: float = field(default=1e-5)
+    train_num_inner_epochs: int = field(default=1)
+    train_gradient_accumulation_steps: int = field(default=1)
+    train_max_grad_norm: float = field(default=1.0)
+    train_cfg: bool = field(default=True)
+    train_adv_clip_max: float = field(default=5.0)
+    train_timestep_fraction: float = field(default=1.0)
+    train_clip_range: float = field(default=1e-4)
+
+    # Adam优化器配置
+    adam_beta1: float = field(default=0.9)
+    adam_beta2: float = field(default=0.999)
+    adam_weight_decay: float = field(default=1e-4)
+    adam_epsilon: float = field(default=1e-8)
+
+    # 状态跟踪配置
+    per_prompt_stat_tracking: bool = field(default=True)
+    per_prompt_stat_tracking_buffer_size: int = field(default=16)
+    per_prompt_stat_tracking_min_count: int = field(default=16)
+
+    # 提示和奖励函数
+    prompt_fn: str = field(default="simple_animals")
+    prompt_fn_kwargs: dict = field(default_factory=dict)
+    reward_fn: str = field(default="jpeg_compressibility")
+
+    # 数据加载配置
+    num_workers: int = field(default=4)
+    dataloader_pin_memory: bool = field(default=True)
+
+    # 顶层配置
     log_dir: str = field(default="logs")
     sd_model: str = field(default="runwayml/stable-diffusion-v1-5")
     sd_revision: str = field(default="main")
     learning_rate: float = field(default=1e-4)
     eval_epoch: int = field(default=2)
 
-    # 顶层配置
-    run_name: str = ""
-    seed: int = 0
-    logdir: str = "logs"
-    num_epochs: int = 400
-    save_freq: int = 400
-    num_checkpoint_limit: int = 10
-    mixed_precision: str = "fp16"
-    allow_tf32: bool = True
-    resume_from: str = ""
-    use_xformers: bool = False
-
     # 采样相关配置
-    sample_num_steps: int = 20
-    sample_eta: float = 1.0
-    sample_guidance_scale: float = 5.0
-    sample_batch_size: int = 1
-    sample_num_batches_per_epoch: int = 2
-    sample_eval_batch_size: int = 8
+    sample_num_step: int = field(default=50)
+    timestep_fraction: float = field(default=0.8)
 
     # 训练相关配置
-    train_batch_size: int = 1
     train_learning_rate: float = 3e-5
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
@@ -92,26 +137,39 @@ class Trainer:
         curriculum: Curriculum,
         update_target_difficulty: Callable[[int], None],
         config: Config,
-        reward_function: Callable[[torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+        reward_function: Callable[[Pipeline, torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+        reward_init_function: Callable[[Accelerator], None],
         prompt_function: Callable[[], tuple[str, Any]],
+        vqa_model_name: str,
     ) -> None:
         self.curriculum = curriculum
         self.update_target_difficulty = update_target_difficulty
         self.config = config
+
+        # 设置运行名称
         unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
         if not self.config.run_name:
-            self.run_name = f"d3po_{unique_id}"
+            self.config.run_name = unique_id
         else:
-            self.run_name = f"{self.config.run_name}_{unique_id}"
+            self.config.run_name += "_" + unique_id
 
         if self.config.resume_from:
-            self.config.resume_from = self._norm_path(self.config.resume_from)
+            self.config.resume_from = os.path.normpath(os.path.expanduser(self.config.resume_from))
+            if "checkpoint_" not in os.path.basename(self.config.resume_from):
+                # 获取此目录中最新的检查点
+                checkpoints = list(filter(lambda x: "checkpoint_" in x, os.listdir(self.config.resume_from)))
+                if len(checkpoints) == 0:
+                    raise ValueError(f"No checkpoints found in {self.config.resume_from}")
+                self.config.resume_from = os.path.join(
+                    self.config.resume_from,
+                    sorted(checkpoints, key=lambda x: int(x.split("_")[-1]))[-1],
+                )
 
-        # 训练时使用的时间步数
+        # 每个轨迹中用于训练的时间步数
         self.num_train_timesteps = int(self.config.sample_num_steps * self.config.train_timestep_fraction)
 
         accelerator_config = ProjectConfiguration(
-            project_dir=os.path.join(self.config.log_dir, self.run_name),
+            project_dir=os.path.join(self.config.logdir, self.config.run_name),
             automatic_checkpoint_naming=True,
             total_limit=self.config.num_checkpoint_limit,
         )
@@ -120,32 +178,28 @@ class Trainer:
             log_with="wandb",
             mixed_precision=self.config.mixed_precision,
             project_config=accelerator_config,
-            gradient_accumulation_steps=self.config.gradient_accumulation_steps * self.num_train_timesteps,
+            gradient_accumulation_steps=self.config.train_gradient_accumulation_steps * self.num_train_timesteps,
         )
+        reward_init_function(self.accelerator)
         self.available_devices = self.accelerator.num_processes
+        self._fix_seed()
+
         if self.accelerator.is_main_process:
             self.accelerator.init_trackers(
-                project_name="d3po-pytorch", config=asdict(self.config), init_kwargs={"wandb": {"name": self.run_name}}
+                project_name="d3po-pytorch",
+                config=asdict(self.config),
+                init_kwargs={"wandb": {"name": self.config.run_name}},
             )
         logger.info(f"\n{self.config}")
 
-        # 设置随机种子
-        self._fix_seed()
-
-        # 加载模型和调度器
+        # 加载调度器、分词器和模型
         self.sd_pipeline = StableDiffusionPipeline.from_pretrained(
-            self.config.sd_model, revision=self.config.sd_revision, torch_dtype=torch.float16
+            self.config.pretrained_model, revision=self.config.pretrained_revision, use_fast=True
         )
-        if self.config.use_xformers:
-            self.sd_pipeline.enable_xformers_memory_efficient_attention()
-
-        # 冻结不需要训练的模型参数
+        # 冻结模型参数以节省更多内存
         self.sd_pipeline.vae.requires_grad_(False)
         self.sd_pipeline.text_encoder.requires_grad_(False)
-        self.sd_pipeline.unet.requires_grad_(True)
-        if self.config.train_activation_checkpointing:
-            self.sd_pipeline.unet.enable_gradient_checkpointing()
-
+        self.sd_pipeline.unet.requires_grad_(not self.config.use_lora)
         # 禁用安全检查器
         self.sd_pipeline.safety_checker = None
 
@@ -161,46 +215,78 @@ class Trainer:
         # 切换到DDIM采样器
         self.sd_pipeline.scheduler = DDIMScheduler.from_config(self.sd_pipeline.scheduler.config)
 
-        # 混合精度设置
+        # 对于混合精度训练，我们将所有非训练权重（vae、非lora text_encoder和非lora unet）转换为半精度
+        # 因为这些权重仅用于推理，因此无需保持全精度权重。
         inference_dtype = torch.float32
         if self.accelerator.mixed_precision == "fp16":
             inference_dtype = torch.float16
         elif self.accelerator.mixed_precision == "bf16":
             inference_dtype = torch.bfloat16
 
-        # 将模型移到设备上并设置数据类型
+        # 将unet、vae和text_encoder移至设备并转换为inference_dtype
         self.sd_pipeline.vae.to(self.accelerator.device, dtype=inference_dtype)
         self.sd_pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
-        self.sd_pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
-        self.ref = copy.deepcopy(self.sd_pipeline.unet)
-        for param in self.ref.parameters():
-            param.requires_grad = False
+        if self.config.use_lora:
+            self.sd_pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
+        self.vqa_pipeline = pipeline(
+            "image-text-to-text",
+            model=vqa_model_name,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            batch_size=config.train_batch_size,
+        )
 
-        trainable_layers = self.sd_pipeline.unet
+        self.vqa_pipeline.model.eval()
 
-        # 设置检查点保存和加载
+        if self.config.use_lora:
+            # Set correct lora layers
+            lora_attn_procs = {}
+            for name in self.sd_pipeline.unet.attn_processors.keys():
+                cross_attention_dim = (
+                    None if name.endswith("attn1.processor") else self.sd_pipeline.unet.config.cross_attention_dim
+                )
+                if name.startswith("mid_block"):
+                    hidden_size = self.sd_pipeline.unet.config.block_out_channels[-1]
+                elif name.startswith("up_blocks"):
+                    block_id = int(name[len("up_blocks.")])
+                    hidden_size = list(reversed(self.sd_pipeline.unet.config.block_out_channels))[block_id]
+                elif name.startswith("down_blocks"):
+                    block_id = int(name[len("down_blocks.")])
+                    hidden_size = self.sd_pipeline.unet.config.block_out_channels[block_id]
+
+                lora_attn_procs[name] = LoRAAttnProcessor(
+                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim
+                )
+            self.sd_pipeline.unet.set_attn_processor(lora_attn_procs)
+            self.trainable_layers = AttnProcsLayers(self.sd_pipeline.unet.attn_processors)
+        else:
+            self.trainable_layers = self.sd_pipeline.unet
+
+        # 设置使用Accelerate的diffusers友好的检查点保存
         self.accelerator.register_save_state_pre_hook(self._save_model_hook)
         self.accelerator.register_load_state_pre_hook(self._load_model_hook)
 
-        # 设置TensorFloat32（如果允许）
+        # 为Ampere GPU启用TF32以加快训练速度，
+        # 参见 https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
         if self.config.allow_tf32:
             torch.backends.cuda.matmul.allow_tf32 = True
 
+        # 初始化优化器
         optimizer_cls = torch.optim.AdamW
 
         self.optimizer = optimizer_cls(
-            trainable_layers.parameters(),
-            lr=self.config.learning_rate,
+            self.trainable_layers.parameters(),
+            lr=self.config.train_learning_rate,
             betas=(self.config.adam_beta1, self.config.adam_beta2),
             weight_decay=self.config.adam_weight_decay,
             eps=self.config.adam_epsilon,
         )
 
-        # 准备提示词函数和奖励函数
+        # 准备提示和奖励函数
         self.prompt_fn = prompt_function
         self.reward_fn = reward_function
 
-        # 生成负面提示词嵌入
+        # 生成负面提示嵌入
         neg_prompt_embed = self.sd_pipeline.text_encoder(
             self.sd_pipeline.tokenizer(
                 [""],
@@ -213,29 +299,39 @@ class Trainer:
         self.sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.sample_batch_size, 1, 1)
         self.train_neg_prompt_embeds = neg_prompt_embed.repeat(self.config.train_batch_size, 1, 1)
 
-        # 自动混合精度设置
+        # 初始化统计跟踪器
+        self.stat_tracker = None
+        if self.config.per_prompt_stat_tracking:
+            self.stat_tracker = PerPromptStatTracker(
+                self.config.per_prompt_stat_tracking_buffer_size,
+                self.config.per_prompt_stat_tracking_min_count,
+            )
+
+        # 出于某种原因，对于非lora训练autocast是必要的，但对于lora训练它不是必要的，而且会使用更多内存
         self.autocast = self.accelerator.autocast
 
-        # 使用accelerator准备所有组件
-        trainable_layers, self.optimizer = self.accelerator.prepare(trainable_layers, self.optimizer)
+        # 使用`accelerator`准备所有内容
+        self.trainable_layers, self.optimizer = self.accelerator.prepare(self.trainable_layers, self.optimizer)
 
-        # 创建异步执行器
+        # 执行器异步执行回调。这对于llava回调是有益的，它向运行llava推理的远程服务器发出请求。
         self.executor = futures.ThreadPoolExecutor(max_workers=2)
 
-        # 计算每个epoch的样本数和总训练批次大小
+        # 计算每个epoch的样本数和批次大小
         self.samples_per_epoch = (
             self.config.sample_batch_size * self.accelerator.num_processes * self.config.sample_num_batches_per_epoch
         )
         self.total_train_batch_size = (
-            self.config.train_batch_size * self.accelerator.num_processes * self.config.gradient_accumulation_steps
+            self.config.train_batch_size
+            * self.accelerator.num_processes
+            * self.config.train_gradient_accumulation_steps
         )
 
-        # 检查批次大小配置
+        # 检查配置的一致性
         assert self.config.sample_batch_size >= self.config.train_batch_size
         assert self.config.sample_batch_size % self.config.train_batch_size == 0
         assert self.samples_per_epoch % self.total_train_batch_size == 0
 
-        # 如果从检查点恢复，加载状态
+        # 如果从检查点恢复，设置起始epoch
         if self.config.resume_from:
             logger.info(f"Resuming from {self.config.resume_from}")
             self.accelerator.load_state(self.config.resume_from)
@@ -312,7 +408,7 @@ class Trainer:
         logger.info(f"  Num Epochs = {self.config.num_epochs}")
         logger.info(f"  Sample batch size per device = {self.config.sample_batch_size}")
         logger.info(f"  Train batch size per device = {self.config.train_batch_size}")
-        logger.info(f"  Gradient Accumulation steps = {self.config.gradient_accumulation_steps}")
+        logger.info(f"  Gradient Accumulation steps = {self.config.train_gradient_accumulation_steps}")
         logger.info("")
         logger.info(f"  Total number of samples per epoch = {self.samples_per_epoch}")
         logger.info(
