@@ -3,7 +3,7 @@ import os
 import contextlib
 import datetime
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable
 
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
@@ -22,7 +22,6 @@ from train.trainer.common.state_tracker import PerPromptStatTracker
 from train.trainer.common.pipeline_with_logprob import pipeline_with_logprob
 from train.trainer.common.ddim_with_logprob import ddim_step_with_logprob
 import torch
-from torch.utils.data import Dataset, DataLoader
 from transformers import Pipeline
 from transformers.pipelines import pipeline
 import wandb
