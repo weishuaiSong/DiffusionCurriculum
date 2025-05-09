@@ -2,6 +2,8 @@ from dataclasses import asdict, dataclass, field
 from collections import defaultdict
 import logging
 import os
+from transformers import Pipeline
+from transformers.pipelines import pipeline
 import datetime
 from typing import Any, Callable
 from accelerate import Accelerator
@@ -142,6 +144,7 @@ class Trainer:
         reward_function: Callable[[Pipeline, torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
         reward_init_function: Callable[[Accelerator], None],
         prompt_function: Callable[[], tuple[str, Any]],
+        vqa_model_name: str,
     ) -> None:
         self.curriculum = curriculum
         self.update_target_difficulty = update_target_difficulty
@@ -165,6 +168,14 @@ class Trainer:
                 config.per_prompt_stat_tracking_buffer_size,
                 config.per_prompt_stat_tracking_min_count,
             )
+
+        self.vqa_pipeline = pipeline(
+            "image-text-to-text",
+            model=vqa_model_name,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            batch_size=config.train_batch_size,
+        )
 
         self.accelerator = Accelerator(
             log_with="wandb",
@@ -372,7 +383,7 @@ class Trainer:
             )  # (batch_size, num_steps)
 
             # 直接计算奖励
-            rewards, reward_metadata = self.reward_fn(self.sd_pipeline, images, prompts, prompt_metadata)
+            rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
 
             # 评估奖励
@@ -408,7 +419,7 @@ class Trainer:
 
                 # 直接计算评估奖励
                 eval_rewards, eval_reward_metadata = self.reward_fn(
-                    self.sd_pipeline, eval_images, eval_prompts, eval_prompt_metadata
+                    self.vqa_pipeline, eval_images, eval_prompts, eval_prompt_metadata
                 )
                 eval_rewards = torch.as_tensor(eval_rewards, device=self.accelerator.device)
 

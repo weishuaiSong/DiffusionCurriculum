@@ -32,6 +32,8 @@ class DiffusionCurriculumTrainer:
                 config=rl_args,
                 reward_function=scorer_.calc_score,
                 prompt_function=prompt_loader.next,
+                vqa_model_name=curriculum_args.vqa_model,
+                reward_init_function=prompt_loader.init,
             )
         elif curriculum_args.rl_algorithm == "d3po":
             self._trainer = d3po.Trainer(
