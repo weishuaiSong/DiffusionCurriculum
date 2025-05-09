@@ -10,11 +10,10 @@ def main():
     setup_logger(logging.INFO)
     parser = HfArgumentParser(CurriculumTrainerArguments)
     if sys.argv[-1].endswith(".yml") or sys.argv[-1].endswith(".yaml"):
-        curriculum_args, *_ = parser.parse_yaml_file(sys.argv[-1])
+        curriculum_args, *_ = parser.parse_yaml_file(sys.argv[-1], allow_extra_keys=True)
     else:
-        curriculum_args, *_ = parser.parse_args_into_dataclasses()
+        curriculum_args, *_ = parser.parse_args_into_dataclasses(return_remaining_strings=True)
 
-    print(curriculum_args)
     # 根据选择的RL算法选择相应的Config类
     if curriculum_args.rl_algorithm == "dpok":
         ConfigClass = dpok.Config
