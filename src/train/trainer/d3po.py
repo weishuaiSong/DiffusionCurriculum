@@ -13,6 +13,9 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
     StableDiffusionPipeline,
 )
+from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import (
+    StableDiffusionXLPipeline,
+)
 from diffusers.loaders import AttnProcsLayers
 from diffusers.models.attention_processor import LoRAAttnProcessor
 import numpy as np
@@ -185,9 +188,14 @@ class Trainer:
         logger.info(f"\n{self.config}")
 
         # 加载调度器、分词器和模型
-        self.sd_pipeline = StableDiffusionPipeline.from_pretrained(
-            self.config.pretrained_model, revision=self.config.pretrained_revision, use_fast=True
-        )
+        if "stable-diffusion-xl" in self.config.pretrained_model:
+            self.sd_pipeline = StableDiffusionXLPipeline.from_pretrained(
+                self.config.pretrained_model, revision=self.config.pretrained_revision, use_fast=True
+            )
+        else:
+            self.sd_pipeline = StableDiffusionPipeline.from_pretrained(
+                self.config.pretrained_model, revision=self.config.pretrained_revision, use_fast=True
+            )
         # 冻结模型参数以节省更多内存
         self.sd_pipeline.vae.requires_grad_(False)
         self.sd_pipeline.text_encoder.requires_grad_(False)
