@@ -100,10 +100,6 @@ class Config:
     sd_revision: str = field(default="main")
     learning_rate: float = field(default=1e-4)
 
-    # 采样相关配置
-    sample_num_step: int = field(default=50)
-    timestep_fraction: float = field(default=0.8)
-
     # 训练相关配置
     train_learning_rate: float = 3e-5
     adam_beta1: float = 0.9
@@ -224,7 +220,7 @@ class Trainer:
         self.sd_pipeline.text_encoder.to(self.accelerator.device, dtype=inference_dtype)
         self.sd_pipeline.unet.to(self.accelerator.device, dtype=inference_dtype)
         self.ref = copy.deepcopy(self.sd_pipeline.unet)
-        for param in ref.parameters():
+        for param in self.ref.parameters():
             param.requires_grad = False
 
         self.vqa_pipeline = pipeline(
@@ -532,7 +528,9 @@ class Trainer:
         # 这是一个hack，强制wandb将图像记录为JPEG而不是PNG
         with tempfile.TemporaryDirectory() as tmpdir:
             for i, image in enumerate(images):
-                pil = Image.fromarray((image[0].cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8))
+                pil = Image.fromarray(
+                    (image[0].to(torch.float16).cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+                )
                 pil = pil.resize((256, 256))
                 pil.save(os.path.join(tmpdir, f"{i}.jpg"))
             self.accelerator.log(

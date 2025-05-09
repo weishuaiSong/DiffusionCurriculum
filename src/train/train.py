@@ -8,9 +8,7 @@ from train.trainer import dpok, d3po, ddpo
 @dataclass
 class CurriculumTrainerArguments:
     prompt_filename: str = field()
-    vqa_model: str = field(
-        default="llava-hf/llava-1.5-7b-hf", metadata={"help": "the pretrained model to use"}
-    )
+    vqa_model: str = field(default="llava-hf/llava-1.5-7b-hf", metadata={"help": "the pretrained model to use"})
     curriculum_strategy: str = field(
         default="timestep", metadata={"help": "The curriculum strategy to use for training."}
     )
@@ -42,6 +40,8 @@ class DiffusionCurriculumTrainer:
                 config=rl_args,
                 reward_function=scorer_.calc_score,
                 prompt_function=prompt_loader.next,
+                vqa_model_name=curriculum_args.vqa_model,
+                reward_init_function=prompt_loader.init,
             )
         elif curriculum_args.rl_algorithm == "ddpo":
             self._trainer = ddpo.Trainer(
