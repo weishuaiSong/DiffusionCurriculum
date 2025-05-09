@@ -3,7 +3,6 @@ from collections import defaultdict
 import logging
 import os
 import datetime
-from concurrent import futures
 from typing import Any, Callable
 from accelerate import Accelerator
 from accelerate.utils import set_seed, ProjectConfiguration
@@ -140,7 +139,8 @@ class Trainer:
         curriculum: Curriculum,
         update_target_difficulty: Callable[[int], None],
         config: Config,
-        reward_function: Callable[[torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+        reward_function: Callable[[Pipeline, torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
+        reward_init_function: Callable[[Accelerator], None],
         prompt_function: Callable[[], tuple[str, Any]],
     ) -> None:
         self.curriculum = curriculum
@@ -174,7 +174,7 @@ class Trainer:
             # the total number of optimizer steps to accumulate across.
             gradient_accumulation_steps=self.config.gradient_accumulation_steps * self.num_train_timesteps,
         )
-
+        reward_init_function(self.accelerator)
         self.available_devices = self.accelerator.num_processes
         self._fix_seed()
         if self.accelerator.is_main_process:
@@ -253,10 +253,6 @@ class Trainer:
         # Prepare everything with our `accelerator`.
         trainable_layers, optimizer = self.accelerator.prepare(trainable_layers, self.optimizer)
         self.optimizer = optimizer
-
-        # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
-        # remote server running llava inference.
-        self.executor = futures.ThreadPoolExecutor(max_workers=2)
 
         self.samples_per_epoch = (
             self.config.sample_batch_size * self.accelerator.num_processes * self.config.sample_num_batches_per_epoch
@@ -375,9 +371,11 @@ class Trainer:
                 self.config.sample_batch_size, 1
             )  # (batch_size, num_steps)
 
-            # compute rewards asynchronously
-            rewards = self.executor.submit(self.reward_fn, images, prompts, prompt_metadata)
-            # yield to to make sure reward computation starts
+            # 直接计算奖励
+            rewards, reward_metadata = self.reward_fn(self.sd_pipeline, images, prompts, prompt_metadata)
+            rewards = torch.as_tensor(rewards, device=self.accelerator.device)
+
+            # 评估奖励
             eval_rewards = None
             if epoch % self.config.eval_epoch == 0:
                 eval_prompts, eval_prompt_metadata = zip(
@@ -408,8 +406,11 @@ class Trainer:
                         output_type="pt",
                     )
 
-                # compute rewards asynchronously
-                eval_rewards = self.executor.submit(self.reward_fn, eval_images, eval_prompts, eval_prompt_metadata)
+                # 直接计算评估奖励
+                eval_rewards, eval_reward_metadata = self.reward_fn(
+                    self.sd_pipeline, eval_images, eval_prompts, eval_prompt_metadata
+                )
+                eval_rewards = torch.as_tensor(eval_rewards, device=self.accelerator.device)
 
             samples.append(
                 {
@@ -423,21 +424,6 @@ class Trainer:
                     "eval_rewards": eval_rewards,
                 }
             )
-        # wait for all rewards to be computed
-        for sample in t(
-            samples,
-            desc="Waiting for rewards",
-            disable=not self.accelerator.is_local_main_process,
-            position=0,
-        ):
-            rewards, reward_metadata = sample["rewards"].result()
-            # accelerator.print(reward_metadata)
-            sample["rewards"] = torch.as_tensor(rewards, device=self.accelerator.device)
-            if sample["eval_rewards"] is not None:
-                eval_rewards, eval_reward_metadata = sample["eval_rewards"].result()
-                sample["eval_rewards"] = torch.as_tensor(rewards, device=self.accelerator.device)
-            else:
-                del sample["eval_rewards"]
 
         # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
         zip_samples = {k: torch.cat([s[k] for s in samples]) for k in samples[0].keys()}
