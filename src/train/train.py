@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from numpy.random import beta
 from train.ordered_dataloader import CurriculumPromptLoader
 from train.scorer import VQAScorer
 from train.curriculum import Curriculum
@@ -16,13 +17,21 @@ class CurriculumTrainerArguments:
         default="ddpo",
         metadata={"help": "The RL algorithm to use for training, supported algorithms: ddpo, d3po, dpok"},
     )
+    reward_curriculum_beta: float = field(default=0.5)
+    reward_curriculum_alpha: float = field(default=2)
+    reward_curriculum_eta: float = field(default=50)
 
 
 class DiffusionCurriculumTrainer:
     def __init__(self, curriculum_args: CurriculumTrainerArguments, rl_args) -> None:
         prompt_loader = CurriculumPromptLoader(prompt_path=curriculum_args.prompt_filename)
         scorer_ = VQAScorer(prompt_loader.set_difficulty)
-        self.curriculum = Curriculum(strategy=curriculum_args.curriculum_strategy)
+        self.curriculum = Curriculum(
+            eta=curriculum_args.reward_curriculum_eta,
+            beta=curriculum_args.reward_curriculum_beta,
+            alpha=curriculum_args.reward_curriculum_alpha,
+            strategy=curriculum_args.curriculum_strategy,
+        )
 
         # 根据选定的RL算法初始化相应的训练器
         if curriculum_args.rl_algorithm == "dpok":

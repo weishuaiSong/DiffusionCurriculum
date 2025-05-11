@@ -111,6 +111,7 @@ class Trainer:
     ) -> None:
         self.curriculum = curriculum
         self.update_target_difficulty = update_target_difficulty
+        self.last_difficulty = 0
         self.config = config
 
         # 设置运行名称
@@ -372,8 +373,10 @@ class Trainer:
             disable=not self.accelerator.is_local_main_process,
             position=0,
         ):
-            difficulty = self.curriculum.infer_target_difficulty({"current_step": global_step + i})
-            self.update_target_difficulty(difficulty)
+            self.last_difficulty = self.curriculum.infer_target_difficulty(
+                {"current_step": global_step + i, "difficulty": self.last_difficulty}
+            )
+            self.update_target_difficulty(self.last_difficulty)
             # 生成提示
             prompts, prompt_metadata = zip(*[self.prompt_fn() for _ in range(self.config.sample_batch_size)])
 
