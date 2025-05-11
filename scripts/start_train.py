@@ -27,7 +27,7 @@ def main():
     # 解析RL特定参数
     parser = HfArgumentParser([CurriculumTrainerArguments, ConfigClass])
     if sys.argv[-1].endswith(".yml") or sys.argv[-1].endswith(".yaml"):
-        curriculum_args, rl_args = parser.parse_yaml_file(sys.argv[-1])
+        curriculum_args, rl_args = parser.parse_yaml_file(sys.argv[-1], True)
     else:
         curriculum_args, rl_args = parser.parse_args_into_dataclasses()
 
