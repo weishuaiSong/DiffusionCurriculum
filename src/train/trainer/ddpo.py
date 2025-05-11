@@ -372,7 +372,7 @@ class Trainer:
             disable=not self.accelerator.is_local_main_process,
             position=0,
         ):
-            difficulty = self.curriculum.infer_target_difficulty({"current_step": global_step})
+            difficulty = self.curriculum.infer_target_difficulty({"current_step": global_step + i})
             self.update_target_difficulty(difficulty)
             # 生成提示
             prompts, prompt_metadata = zip(*[self.prompt_fn() for _ in range(self.config.sample_batch_size)])
