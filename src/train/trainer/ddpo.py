@@ -408,7 +408,11 @@ class Trainer:
             rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
             self.last_difficulty = self.curriculum.infer_target_difficulty(
-                {"current_step": global_step + i, "difficulty": self.last_difficulty, "reward": rewards.mean()}
+                {
+                    "current_step": global_step + i,
+                    "difficulty": self.last_difficulty,
+                    "reward": rewards.mean().cpu().numpy(),
+                }
             )
             self.update_target_difficulty(self.last_difficulty)
 
