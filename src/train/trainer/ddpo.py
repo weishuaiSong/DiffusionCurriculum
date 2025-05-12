@@ -595,7 +595,6 @@ class Trainer:
                 # 记录与训练相关的内容
                 info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
                 info = self.accelerator.reduce(info, reduction="mean")
-                info["loss"] = torch.mean(info["loss"])
                 info.update({"epoch": epoch, "inner_epoch": inner_epoch})
                 self.accelerator.log(info, step=global_step)
                 info = defaultdict(list)
