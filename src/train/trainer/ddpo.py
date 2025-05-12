@@ -373,10 +373,6 @@ class Trainer:
             disable=not self.accelerator.is_local_main_process,
             position=0,
         ):
-            self.last_difficulty = self.curriculum.infer_target_difficulty(
-                {"current_step": global_step + i, "difficulty": self.last_difficulty}
-            )
-            self.update_target_difficulty(self.last_difficulty)
             # 生成提示
             prompts, prompt_metadata = zip(*[self.prompt_fn() for _ in range(self.config.sample_batch_size)])
 
@@ -411,6 +407,10 @@ class Trainer:
             # 直接计算奖励，不使用executor
             rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
+            self.last_difficulty = self.curriculum.infer_target_difficulty(
+                {"current_step": global_step + i, "difficulty": self.last_difficulty, "reward": rewards.mean()}
+            )
+            self.update_target_difficulty(self.last_difficulty)
 
             samples.append(
                 {
