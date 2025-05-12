@@ -27,10 +27,12 @@ class DiffusionCurriculumTrainer:
         prompt_loader = CurriculumPromptLoader(prompt_path=curriculum_args.prompt_filename)
         scorer_ = VQAScorer(prompt_loader.set_difficulty)
         self.curriculum = Curriculum(
+            difficulty_range_getter=prompt_loader.difficulty_range_getter,
             eta=curriculum_args.reward_curriculum_eta,
             beta=curriculum_args.reward_curriculum_beta,
             alpha=curriculum_args.reward_curriculum_alpha,
             strategy=curriculum_args.curriculum_strategy,
+            sample_num_batches_per_epoch_getter=prompt_loader.get_sample_num_batches_per_epoch,
         )
 
         # 根据选定的RL算法初始化相应的训练器

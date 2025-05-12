@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Config:
-    sample_num_step: int = field(default=50)
-    train_num_step: int = field(default=1000)
+    sample_num_steps: int = field(default=50)
+    train_num_steps: int = field(default=1000)
     timestep_fraction: float = field(default=0.8)
     log_dir: str = field(default="logs")
     sd_model: str = field(default="runwayml/stable-diffusion-v1-5")
@@ -155,7 +155,7 @@ class Trainer:
             self.config.resume_from = self._norm_path(self.config.resume_from)
 
         # number of timesteps within each trajectory to train on
-        self.num_train_timesteps = int(self.config.sample_num_step * self.config.timestep_fraction)
+        self.num_train_timesteps = int(self.config.sample_num_steps * self.config.timestep_fraction)
 
         accelerator_config = ProjectConfiguration(
             project_dir=os.path.join(self.config.log_dir, self.run_name),
@@ -370,7 +370,7 @@ class Trainer:
                     self.sd_pipeline,
                     prompt_embeds=prompt_embeds,
                     negative_prompt_embeds=self.sample_neg_prompt_embeds,
-                    num_inference_steps=self.config.sample_num_step,
+                    num_inference_steps=self.config.sample_num_steps,
                     guidance_scale=self.config.sample_guidance_scale,
                     eta=self.config.sample_eta,
                     output_type="pt",
@@ -411,7 +411,7 @@ class Trainer:
                         self.sd_pipeline,
                         prompt_embeds=eval_prompt_embeds,
                         negative_prompt_embeds=eval_sample_neg_prompt_embeds,
-                        num_inference_steps=self.config.sample_num_step,
+                        num_inference_steps=self.config.sample_num_steps,
                         guidance_scale=self.config.sample_guidance_scale,
                         eta=self.config.sample_eta,
                         output_type="pt",
@@ -509,7 +509,7 @@ class Trainer:
 
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert total_batch_size == self.config.sample_batch_size * self.config.sample_num_batches_per_epoch
-        assert num_timesteps == self.config.sample_num_step
+        assert num_timesteps == self.config.sample_num_steps
 
         #################### TRAINING ####################
         for inner_epoch in range(self.config.num_inner_epochs):
