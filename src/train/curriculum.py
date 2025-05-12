@@ -22,9 +22,10 @@ class Curriculum:
         self.difficulty_range_getter = difficulty_range_getter
 
     def infer_target_difficulty(self, metadata: dict[str, Any]) -> int:
+        min_difficulty, max_difficulty = self.difficulty_range_getter()
         if self.strategy == "random":
             # TODO: 需要传进来难度scale，或者我们后面定好
-            return random.randint(3, 22)
+            return random.randint(min_difficulty, max_difficulty)
         elif self.strategy == "reward":
             return self._reward_based_infer(metadata)
         elif self.strategy == "timestep":
@@ -33,17 +34,18 @@ class Curriculum:
             raise NotImplementedError("Not implemented yet")
 
     def _reward_based_infer(self, metadata: dict[str, Any]) -> int:
+        min_difficulty, max_difficulty = self.difficulty_range_getter()
         result_difficulty = metadata["difficulty"] + self.eta * np.tanh(self.alpha * metadata["reward"] - self.beta)
-        return min(max(0, result_difficulty) + 3, 22)
+        return min(max(0, result_difficulty) + min_difficulty, max_difficulty)
 
     def _timestep_based_infer(self, metadata: dict[str, Any]) -> int:
-        difficulty_min, difficulty_max = self.difficulty_range_getter()
+        min_difficulty, max_difficulty = self.difficulty_range_getter()
         return min(
             max(
                 0,
                 metadata["current_step"]
-                // (self.sample_num_batches_per_epoch_getter() / (difficulty_max - difficulty_min)),
+                // (self.sample_num_batches_per_epoch_getter() / (max_difficulty - min_difficulty)),
             )
-            + difficulty_min,
-            difficulty_max,
+            + min_difficulty,
+            max_difficulty,
         )
