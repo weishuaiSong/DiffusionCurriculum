@@ -40,7 +40,6 @@ class Config:
     sd_model: str = field(default="runwayml/stable-diffusion-v1-5")
     sd_revision: str = field(default="main")
     learning_rate: float = field(default=1e-4)
-    eval_epoch: int = field(default=2)
 
     # random seed for reproducibility.
     seed = 0
@@ -386,43 +385,6 @@ class Trainer:
             rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
 
-            # 评估奖励
-            eval_rewards = None
-            if epoch % self.config.eval_epoch == 0:
-                eval_prompts, eval_prompt_metadata = zip(
-                    *[self.prompt_fn() for _ in range(self.config.sample_batch_size)]
-                )
-
-                # encode prompts
-                eval_prompt_ids = self.sd_pipeline.tokenizer(
-                    eval_prompts,
-                    return_tensors="pt",
-                    padding="max_length",
-                    truncation=True,
-                    max_length=self.sd_pipeline.tokenizer.model_max_length,
-                ).input_ids.to(self.accelerator.device)
-                eval_prompt_embeds = self.sd_pipeline.text_encoder(eval_prompt_ids)[0]
-                eval_sample_neg_prompt_embeds = self.sample_neg_prompt_embeds.repeat(
-                    self.config.sample_batch_size, 1, 1
-                )
-                # sample
-                with self.autocast():
-                    eval_images, _, _, _ = pipeline_with_logprob(
-                        self.sd_pipeline,
-                        prompt_embeds=eval_prompt_embeds,
-                        negative_prompt_embeds=eval_sample_neg_prompt_embeds,
-                        num_inference_steps=self.config.sample_num_steps,
-                        guidance_scale=self.config.sample_guidance_scale,
-                        eta=self.config.sample_eta,
-                        output_type="pt",
-                    )
-
-                # 直接计算评估奖励
-                eval_rewards, eval_reward_metadata = self.reward_fn(
-                    self.vqa_pipeline, eval_images, eval_prompts, eval_prompt_metadata
-                )
-                eval_rewards = torch.as_tensor(eval_rewards, device=self.accelerator.device)
-
             samples.append(
                 {
                     "prompt_ids": prompt_ids,
@@ -432,7 +394,6 @@ class Trainer:
                     "next_latents": latents[:, 1:],  # each entry is the latent after timestep t
                     "log_probs": log_probs,
                     "rewards": rewards,
-                    "eval_rewards": eval_rewards,
                 }
             )
 
@@ -442,28 +403,15 @@ class Trainer:
         # gather rewards across processes
         rewards = self.accelerator.gather(zip_samples["rewards"]).cpu().numpy()
 
-        # log rewards and images
-        if zip_samples.get("eval_rewards") is not None:
-            eval_rewards = self.accelerator.gather(zip_samples["eval_rewards"]).cpu().numpy()
-            self.accelerator.log(
-                {
-                    "reward": eval_rewards,
-                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
-                    "reward_mean": eval_rewards.mean(),
-                    "reward_std": eval_rewards.std(),
-                },
-                step=global_step,
-            )
-        else:
-            self.accelerator.log(
-                {
-                    "reward": rewards,
-                    "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
-                    "reward_mean": rewards.mean(),
-                    "reward_std": rewards.std(),
-                },
-                step=global_step,
-            )
+        self.accelerator.log(
+            {
+                "reward": rewards,
+                "num_samples": epoch * self.available_devices * self.config.sample_batch_size,
+                "reward_mean": rewards.mean(),
+                "reward_std": rewards.std(),
+            },
+            step=global_step,
+        )
         # this is a hack to force wandb to log the images as JPEGs instead of PNGs
         with tempfile.TemporaryDirectory() as tmpdir:
             for i, image in enumerate(images):
