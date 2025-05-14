@@ -14,7 +14,7 @@ from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 from diffusers.loaders import AttnProcsLayers
-from diffusers.models.attention_processor import LoRAAttnProcessor
+from peft import LoraConfig
 
 import numpy as np
 from train.curriculum import Curriculum
@@ -105,7 +105,7 @@ class Trainer:
         update_target_difficulty: Callable[[int], None],
         config: Config,
         reward_function: Callable[[Pipeline, torch.Tensor, tuple[str], tuple[Any]], torch.Tensor],
-        reward_init_function: Callable[[Accelerator, int], None],
+        reward_init_function: Callable[[Accelerator], None],
         prompt_function: Callable[[], tuple[str, Any]],
         vqa_model_name: str,
     ) -> None:
@@ -151,7 +151,7 @@ class Trainer:
             # 要跨累积的优化器步骤的总数。
             gradient_accumulation_steps=self.config.train_gradient_accumulation_steps * self.num_train_timesteps,
         )
-        reward_init_function(self.accelerator, self.config.sample_batch_size)
+        reward_init_function(self.accelerator)
         self.available_devices = self.accelerator.num_processes
         self._fix_seed()
 
@@ -208,28 +208,21 @@ class Trainer:
         self.vqa_pipeline.model.eval()
 
         if self.config.use_lora:
-            # Set correct lora layers
-            lora_attn_procs = {}
-            for name in self.pipeline.unet.attn_processors.keys():
-                cross_attention_dim = (
-                    None if name.endswith("attn1.processor") else self.pipeline.unet.config.cross_attention_dim
-                )
-                if name.startswith("mid_block"):
-                    hidden_size = self.pipeline.unet.config.block_out_channels[-1]
-                elif name.startswith("up_blocks"):
-                    block_id = int(name[len("up_blocks.")])
-                    hidden_size = list(reversed(self.pipeline.unet.config.block_out_channels))[block_id]
-                elif name.startswith("down_blocks"):
-                    block_id = int(name[len("down_blocks.")])
-                    hidden_size = self.pipeline.unet.config.block_out_channels[block_id]
+            unet_lora_config = LoraConfig(
+                r=4,
+                lora_alpha=4,
+                init_lora_weights="gaussian",
+                # target_modules=["mid_block", "up_blocks.*", "down_blocks.*", "attn1.processor.*"],
+                target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+            )
 
-                lora_attn_procs[name] = LoRAAttnProcessor(
-                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim
-                )
-            self.pipeline.unet.set_attn_processor(lora_attn_procs)
-            self.trainable_layers = AttnProcsLayers(self.pipeline.unet.attn_processors)
-        else:
-            self.trainable_layers = self.pipeline.unet
+            self.pipeline.unet.add_adapter(unet_lora_config)
+            for param in self.pipeline.unet.parameters():
+                # only upcast trainable parameters (LoRA) into fp32
+                if param.requires_grad:
+                    param.data = param.to(torch.float32)
+
+        self.trainable_layers = self.pipeline.unet
 
         # 设置使用Accelerate的diffusers友好的检查点保存
         self.accelerator.register_save_state_pre_hook(self._save_model_hook)
@@ -407,6 +400,7 @@ class Trainer:
             # 直接计算奖励，不使用executor
             rewards, reward_metadata = self.reward_fn(self.vqa_pipeline, images, prompts, prompt_metadata)
             rewards = torch.as_tensor(rewards, device=self.accelerator.device)
+
             self.last_difficulty = self.curriculum.infer_target_difficulty(
                 {
                     "current_step": global_step + i,
@@ -516,9 +510,10 @@ class Trainer:
             # 确保我们在内部epoch结束时执行了优化步骤
             assert self.accelerator.sync_gradients
 
-        if epoch % self.config.save_freq == 0:
+        if epoch != 0 and epoch % self.config.save_freq == 0:
             # and self.accelerator.is_main_process:
             print("Start saving...")
+            self.accelerator.wait_for_everyone()
             self.accelerator.save_state()
             print("Save finished!")
 
@@ -567,12 +562,16 @@ class Trainer:
                 advantages = torch.clamp(
                     batch["advantages"], -self.config.train_adv_clip_max, self.config.train_adv_clip_max
                 )
+                # print("advantages:", advantages)
+                # print("log_prob:", log_prob)
+                # print("batcg log_probs:", batch["log_probs"][:, j])
                 ratio = torch.exp(log_prob - batch["log_probs"][:, j])
                 unclipped_loss = -advantages * ratio
                 clipped_loss = -advantages * torch.clamp(
                     ratio, 1.0 - self.config.train_clip_range, 1.0 + self.config.train_clip_range
                 )
                 loss = torch.mean(torch.maximum(unclipped_loss, clipped_loss))
+                # print("loss:", loss)
 
                 # 调试值
                 # John Schulman说(ratio - 1) - log(ratio)是更好的
@@ -597,9 +596,11 @@ class Trainer:
                     i + 1
                 ) % self.config.train_gradient_accumulation_steps == 0
                 # 记录与训练相关的内容
+                # print("before info loss:", info["loss"])
                 info = {k: torch.mean(torch.stack(v)) for k, v in info.items()}
                 info = self.accelerator.reduce(info, reduction="mean")
                 info.update({"epoch": epoch, "inner_epoch": inner_epoch})
+                # print("after info loss:", info["loss"])
                 self.accelerator.log(info, step=global_step)
                 info = defaultdict(list)
 
