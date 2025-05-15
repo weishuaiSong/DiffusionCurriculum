@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "accelerate==1.5.2",
     "bert-score>=0.3.13",
+    "datasets==3.3.2",
     "diffusers[torch]==0.33.1",
     "huggingface-hub[cli]>=0.30.2",
     "networkx>=3.4.2",
@@ -15,9 +16,13 @@ dependencies = [
     "sentencepiece>=0.2.0",
     "torchvision>=0.21.0",
     "transformers==4.48.3",
+    "trl",
     "wandb>=0.19.9",
 ]
 
 [build-system]
 requires = ["setuptools>=61.0.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+trl = { git = "https://github.com/huggingface/trl.git", rev = "0f88c179e30b3439467942a08c3190f624d5c423" }
