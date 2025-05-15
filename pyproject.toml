@@ -26,3 +26,21 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv.sources]
 trl = { git = "https://github.com/huggingface/trl.git", rev = "0f88c179e30b3439467942a08c3190f624d5c423" }
+
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "flake8>=7.2.0",
+    "isort>=6.0.1",
+]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.black]
+line-length = 120
+
+[tool.flake8]
+max-line-length = 120
+
