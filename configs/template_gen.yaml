@@ -1,0 +1,13 @@
+# Configuration for template generation
+model_name: "DeepSeek-R1"  # Use DeepSeek-R1 for reasoning capabilities
+keys_path: "configs/keys.yaml"  # Path to the API keys file
+output_file: "meta_templates.json"  # Main output file for meta_templates
+concrete_templates_output: "templates.json"  # Output file for templates
+
+# Generation parameters
+meta_templates_count: 15  # Number of meta-templates to generate
+system_prompt: "You are an expert in creating high-quality, diverse templates for Visual Question Answering tasks. Your goal is to generate effective instruction templates that can be used to prompt AI models to answer questions about images."
+
+# API parameters
+max_concurrent_per_key: 300
+max_retries: 5
