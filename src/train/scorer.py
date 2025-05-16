@@ -7,14 +7,21 @@ from transformers import Pipeline
 from transformers.pipelines import pipeline
 from typing import Callable
 
+default_qa_template = "Based on the image, answer the following question by strictly selecting only one option from the given choices. Do not provide any additional explanation.\nQuestion: {question}\nAnswer:"
 
 def is_answer_match(ans: str, should: str) -> bool:
-    return should.lower().strip() in ans.lower()
-
+    ans, should = ans.lower().strip(), should.lower().strip()
+    patterns = [
+        should,                     # "(B) 7 years"
+        should.split(')')[0] + ")", # "(B)"
+        should.split(') ')[1]       # "7 years"
+    ]
+    return any(pattern in ans for pattern in patterns)
 
 class VQAScorer:
-    def __init__(self, set_curr_score: Callable[[int], None]) -> None:
+    def __init__(self, set_curr_score: Callable[[int], None], template: str=default_qa_template) -> None:
         self.set_curr_score = set_curr_score
+        self.template = template
 
     def calc_score(
             self, vqa_pipeline: Pipeline, images: torch.Tensor, prompts: tuple[str], metadata: tuple[Any]
@@ -27,7 +34,7 @@ class VQAScorer:
 
         for i, image in enumerate(images):
             all_qa: list[dict[str, str]] = (
-                    metadata[i]["qa"]["object"] + metadata[i]["qa"]["relation"] + metadata[i]["qa"]["attribute"]
+                metadata[i]["qa"]["relation"] + metadata[i]["qa"]["attribute"]
             )
             if isinstance(image, torch.Tensor):
                 pil_image = to_pil(image.to(torch.float))
@@ -44,7 +51,7 @@ class VQAScorer:
                                     },
                                     {
                                         "type": "text",
-                                        "text": f"Based on the image, answer the question. Only output yes or no.\nQuestion: {each_qa["question"]}\nAnswer:",
+                                        "text": self.template.format(question=each_qa["question"]),
                                     },
                                 ],
                             }
@@ -58,7 +65,7 @@ class VQAScorer:
         # calc reward in batch
         for i in range(0, len(vqa_samples), batch_size):
             q_with_image, answers, qa_lens, img_indices = zip(*vqa_samples[i: i + batch_size])
-            responses = vqa_pipeline(text=q_with_image)  # type: ignore
+            responses = vqa_pipeline(text=q_with_image, max_new_tokens=512, return_full_text=False)  # type: ignore
 
             for response, answer, qa_len, img_idx in zip(responses, answers, qa_lens, img_indices):
                 generated_answer = response[0]["generated_text"][-1]["content"]
